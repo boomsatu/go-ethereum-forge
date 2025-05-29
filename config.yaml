@@ -1,0 +1,25 @@
+
+# Blockchain Node Configuration
+datadir: "./data"
+port: 8080
+rpcport: 8545
+rpcaddr: "127.0.0.1"
+
+# Mining Configuration
+mining: false
+miner: ""
+
+# Network Configuration
+maxpeers: 50
+bootnode: []
+
+# Chain Configuration
+chainid: 1337
+blockgaslimit: 8000000
+
+# Database Configuration
+cache: 256
+handles: 256
+
+# Logging Configuration
+verbosity: 3

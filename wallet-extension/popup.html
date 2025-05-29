@@ -1,0 +1,313 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 350px;
+      min-height: 500px;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .container {
+      padding: 20px;
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .logo {
+      width: 60px;
+      height: 60px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      margin: 0 auto 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: bold;
+    }
+    
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 600;
+    }
+    
+    .wallet-info {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+    
+    .address {
+      font-size: 12px;
+      opacity: 0.8;
+      word-break: break-all;
+      margin-bottom: 10px;
+    }
+    
+    .balance {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+    
+    .balance-usd {
+      font-size: 14px;
+      opacity: 0.7;
+    }
+    
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .btn {
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: translateY(-1px);
+    }
+    
+    .btn-primary {
+      background: #4CAF50;
+      grid-column: 1 / -1;
+    }
+    
+    .btn-primary:hover {
+      background: #45a049;
+    }
+    
+    .transactions {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 15px;
+    }
+    
+    .transaction-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .transaction-item:last-child {
+      border-bottom: none;
+    }
+    
+    .tx-info {
+      flex: 1;
+    }
+    
+    .tx-hash {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+    
+    .tx-amount {
+      font-weight: 600;
+    }
+    
+    .network-status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 15px;
+      font-size: 12px;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4CAF50;
+      margin-right: 8px;
+    }
+    
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 1000;
+    }
+    
+    .modal-content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      color: black;
+      border-radius: 12px;
+      padding: 20px;
+      width: 300px;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+    }
+    
+    .form-group input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+    
+    .error {
+      color: #f44336;
+      font-size: 12px;
+      margin-top: 5px;
+    }
+    
+    .success {
+      color: #4CAF50;
+      font-size: 12px;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">₿</div>
+      <h1>Blockchain Wallet</h1>
+      <div class="network-status">
+        <div class="status-dot"></div>
+        <span id="networkStatus">Connected to localhost:8545</span>
+      </div>
+    </div>
+    
+    <div id="walletView" style="display: none;">
+      <div class="wallet-info">
+        <div class="address" id="walletAddress"></div>
+        <div class="balance" id="walletBalance">0.000 ETH</div>
+        <div class="balance-usd" id="balanceUsd">$0.00 USD</div>
+      </div>
+      
+      <div class="actions">
+        <button class="btn" id="sendBtn">Send</button>
+        <button class="btn" id="receiveBtn">Receive</button>
+        <button class="btn" id="importBtn">Import</button>
+        <button class="btn" id="exportBtn">Export</button>
+      </div>
+      
+      <div class="transactions">
+        <h3 style="margin-top: 0;">Recent Transactions</h3>
+        <div id="transactionList">
+          <div style="text-align: center; opacity: 0.6; padding: 20px;">
+            No transactions yet
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div id="setupView">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h2>Welcome to Blockchain Wallet</h2>
+        <p>Create a new wallet or import existing one</p>
+      </div>
+      
+      <div class="actions">
+        <button class="btn btn-primary" id="createWalletBtn">Create New Wallet</button>
+        <button class="btn" id="importWalletBtn">Import Wallet</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Send Modal -->
+  <div id="sendModal" class="modal">
+    <div class="modal-content">
+      <h3>Send Transaction</h3>
+      <form id="sendForm">
+        <div class="form-group">
+          <label>To Address:</label>
+          <input type="text" id="sendToAddress" placeholder="0x..." required>
+        </div>
+        <div class="form-group">
+          <label>Amount (ETH):</label>
+          <input type="number" id="sendAmount" step="0.000001" placeholder="0.0" required>
+        </div>
+        <div class="form-group">
+          <label>Gas Price (Gwei):</label>
+          <input type="number" id="sendGasPrice" value="20" required>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" id="cancelSend">Cancel</button>
+          <button type="submit" class="btn btn-primary">Send</button>
+        </div>
+        <div id="sendError" class="error"></div>
+        <div id="sendSuccess" class="success"></div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- Import Modal -->
+  <div id="importModal" class="modal">
+    <div class="modal-content">
+      <h3>Import Wallet</h3>
+      <form id="importForm">
+        <div class="form-group">
+          <label>Private Key:</label>
+          <input type="password" id="importPrivateKey" placeholder="Enter private key" required>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" id="cancelImport">Cancel</button>
+          <button type="submit" class="btn btn-primary">Import</button>
+        </div>
+        <div id="importError" class="error"></div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- Receive Modal -->
+  <div id="receiveModal" class="modal">
+    <div class="modal-content">
+      <h3>Receive Funds</h3>
+      <div style="text-align: center;">
+        <div id="qrCode" style="margin: 20px 0;"></div>
+        <div style="word-break: break-all; background: #f5f5f5; padding: 10px; border-radius: 6px; margin: 10px 0;">
+          <span id="receiveAddress"></span>
+        </div>
+        <button class="btn" id="copyAddress">Copy Address</button>
+        <button class="btn" id="closeReceive">Close</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
