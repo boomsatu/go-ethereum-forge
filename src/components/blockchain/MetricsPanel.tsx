@@ -1,8 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { TrendingUp, TrendingDown, Activity, Zap, Clock, Database } from "lucide-react";
+import { TrendingUp, Activity, Clock, Database, RefreshCw } from "lucide-react";
+import { blockchainService } from '@/services/blockchainService';
 
 interface MetricData {
   timestamp: string;
@@ -35,40 +37,83 @@ export const MetricsPanel: React.FC = () => {
     cpuUsage: 0,
     blocksPerSecond: 0,
     transactionsPerSecond: 0,
-    averageBlockTime: 15,
+    averageBlockTime: 0,
     totalTransactions: 0,
     totalBlocks: 0
   });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000); // Update every 5 seconds
+    const interval = setInterval(fetchMetrics, 5000);
     return () => clearInterval(interval);
   }, []);
 
   const fetchMetrics = async () => {
+    setLoading(true);
     try {
-      const response = await fetch('http://localhost:8545/api/metrics');
-      if (response.ok) {
-        const data = await response.json();
-        updateMetricsData(data);
+      // Fetch real metrics from blockchain
+      const [nodeMetrics, networkStats, latestBlock, miningStats] = await Promise.all([
+        blockchainService.getMetrics(),
+        blockchainService.getNetworkStats(),
+        blockchainService.getLatestBlock(),
+        blockchainService.getMiningStats()
+      ]);
+
+      if (nodeMetrics && networkStats) {
+        updateMetricsData({
+          block_count: networkStats.blockHeight,
+          transaction_count: nodeMetrics.transactionCount || 0,
+          total_hash_rate: parseInt(networkStats.hashRate) || 0,
+          memory_usage_mb: nodeMetrics.memoryUsage || 0,
+          peer_count: networkStats.peerCount,
+          uptime_seconds: nodeMetrics.uptime || 0,
+          blocks_per_second: nodeMetrics.blockCount > 0 ? nodeMetrics.blockCount / (nodeMetrics.uptime || 1) : 0,
+          transactions_per_second: nodeMetrics.transactionCount > 0 ? nodeMetrics.transactionCount / (nodeMetrics.uptime || 1) : 0,
+          disk_usage_mb: nodeMetrics.diskUsage || 0
+        });
       } else {
-        generateMockMetrics();
+        // If no real data available, reset to zero values
+        updateMetricsData({
+          block_count: 0,
+          transaction_count: 0,
+          total_hash_rate: 0,
+          memory_usage_mb: 0,
+          peer_count: 0,
+          uptime_seconds: 0,
+          blocks_per_second: 0,
+          transactions_per_second: 0,
+          disk_usage_mb: 0
+        });
       }
     } catch (error) {
-      generateMockMetrics();
+      console.error('Failed to fetch metrics:', error);
+      // Reset to zero if blockchain is not accessible
+      updateMetricsData({
+        block_count: 0,
+        transaction_count: 0,
+        total_hash_rate: 0,
+        memory_usage_mb: 0,
+        peer_count: 0,
+        uptime_seconds: 0,
+        blocks_per_second: 0,
+        transactions_per_second: 0,
+        disk_usage_mb: 0
+      });
     }
+    setLoading(false);
   };
 
   const updateMetricsData = (data: any) => {
+    const now = new Date();
     const newMetric: MetricData = {
-      timestamp: new Date().toLocaleTimeString(),
+      timestamp: now.toLocaleTimeString(),
       blockCount: data.block_count || 0,
       transactionCount: data.transaction_count || 0,
       hashRate: data.total_hash_rate || 0,
       memoryUsage: data.memory_usage_mb || 0,
       peerCount: data.peer_count || 0,
-      blockTime: data.blocks_per_second ? 1 / data.blocks_per_second : 15
+      blockTime: data.blocks_per_second > 0 ? 1 / data.blocks_per_second : 0
     };
 
     setMetricsData(prev => [...prev.slice(-19), newMetric]);
@@ -77,40 +122,13 @@ export const MetricsPanel: React.FC = () => {
       uptime: formatUptime(data.uptime_seconds || 0),
       memoryUsage: data.memory_usage_mb || 0,
       diskUsage: data.disk_usage_mb || 0,
-      cpuUsage: Math.random() * 100, // Mock CPU usage
+      cpuUsage: 0, // CPU usage not available from blockchain
       blocksPerSecond: data.blocks_per_second || 0,
       transactionsPerSecond: data.transactions_per_second || 0,
       averageBlockTime: newMetric.blockTime,
       totalTransactions: data.transaction_count || 0,
       totalBlocks: data.block_count || 0
     });
-  };
-
-  const generateMockMetrics = () => {
-    const now = new Date();
-    const newMetric: MetricData = {
-      timestamp: now.toLocaleTimeString(),
-      blockCount: metricsData.length > 0 ? metricsData[metricsData.length - 1].blockCount + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 100),
-      transactionCount: Math.floor(Math.random() * 50),
-      hashRate: Math.floor(Math.random() * 1000000) + 500000,
-      memoryUsage: Math.floor(Math.random() * 1000) + 200,
-      peerCount: Math.floor(Math.random() * 10) + 5,
-      blockTime: 10 + Math.random() * 10
-    };
-
-    setMetricsData(prev => [...prev.slice(-19), newMetric]);
-
-    setSystemMetrics(prev => ({
-      uptime: formatUptime(Date.now() / 1000),
-      memoryUsage: newMetric.memoryUsage,
-      diskUsage: Math.floor(Math.random() * 5000) + 1000,
-      cpuUsage: Math.random() * 100,
-      blocksPerSecond: 1 / newMetric.blockTime,
-      transactionsPerSecond: newMetric.transactionCount / newMetric.blockTime,
-      averageBlockTime: newMetric.blockTime,
-      totalTransactions: prev.totalTransactions + newMetric.transactionCount,
-      totalBlocks: newMetric.blockCount
-    }));
   };
 
   const formatUptime = (seconds: number) => {
@@ -181,6 +199,27 @@ export const MetricsPanel: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Control Panel */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Real-time Metrics</CardTitle>
+              <CardDescription>Live blockchain performance data</CardDescription>
+            </div>
+            <Button 
+              onClick={fetchMetrics} 
+              disabled={loading}
+              variant="outline"
+              size="sm"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+      </Card>
 
       {/* Performance Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -297,8 +336,8 @@ export const MetricsPanel: React.FC = () => {
       {/* Detailed Statistics */}
       <Card>
         <CardHeader>
-          <CardTitle>Detailed Statistics</CardTitle>
-          <CardDescription>Comprehensive blockchain metrics</CardDescription>
+          <CardTitle>Blockchain Statistics</CardTitle>
+          <CardDescription>Comprehensive blockchain metrics from real data</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
@@ -311,7 +350,9 @@ export const MetricsPanel: React.FC = () => {
               <div className="text-sm text-gray-600">Total Transactions</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">{systemMetrics.averageBlockTime.toFixed(1)}s</div>
+              <div className="text-2xl font-bold text-purple-600">
+                {systemMetrics.averageBlockTime > 0 ? `${systemMetrics.averageBlockTime.toFixed(1)}s` : 'N/A'}
+              </div>
               <div className="text-sm text-gray-600">Avg Block Time</div>
             </div>
             <div className="text-center">

@@ -3,7 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Network, Wifi, Users, Globe, Server, Activity } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Network, Wifi, Users, Globe, Server, Activity, RefreshCw } from "lucide-react";
+import { blockchainService } from '@/services/blockchainService';
 
 interface NetworkInfo {
   chainId: string;
@@ -26,12 +28,12 @@ interface PeerConnection {
 
 export const NetworkStatus: React.FC = () => {
   const [networkInfo, setNetworkInfo] = useState<NetworkInfo>({
-    chainId: '1337',
-    networkId: '1337',
+    chainId: '0',
+    networkId: '0',
     peerCount: 0,
     blockHeight: 0,
-    syncProgress: 100,
-    difficulty: '1000',
+    syncProgress: 0,
+    difficulty: '0',
     hashRate: '0',
     connections: []
   });
@@ -39,88 +41,58 @@ export const NetworkStatus: React.FC = () => {
 
   useEffect(() => {
     fetchNetworkInfo();
-    const interval = setInterval(fetchNetworkInfo, 10000); // Update every 10 seconds
+    const interval = setInterval(fetchNetworkInfo, 10000);
     return () => clearInterval(interval);
   }, []);
 
   const fetchNetworkInfo = async () => {
     setLoading(true);
     try {
-      // Fetch network information from blockchain node
-      const responses = await Promise.all([
-        fetch('http://localhost:8545', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'eth_chainId',
-            params: [],
-            id: 1,
-          }),
-        }),
-        fetch('http://localhost:8545', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'eth_blockNumber',
-            params: [],
-            id: 2,
-          }),
-        }),
-        fetch('http://localhost:8545', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'net_version',
-            params: [],
-            id: 3,
-          }),
-        })
-      ]);
+      // Fetch real network statistics
+      const networkStats = await blockchainService.getNetworkStats();
+      if (networkStats) {
+        setNetworkInfo(prev => ({
+          ...prev,
+          chainId: networkStats.chainId,
+          networkId: networkStats.networkId,
+          blockHeight: networkStats.blockHeight,
+          peerCount: networkStats.peerCount,
+          difficulty: networkStats.difficulty,
+          hashRate: networkStats.hashRate,
+          syncProgress: 100, // Assume synced for local node
+        }));
+      }
 
-      const [chainIdRes, blockNumberRes, networkIdRes] = await Promise.all(
-        responses.map(res => res.json())
-      );
+      // Fetch peer connections
+      const peers = await blockchainService.getPeers();
+      const peerConnections: PeerConnection[] = peers.map((peer: any, index: number) => ({
+        id: peer.id || `peer_${index}`,
+        address: peer.address || peer.remote || `unknown_${index}`,
+        protocol: peer.name || peer.protocol || 'eth/66',
+        latency: peer.latency || Math.floor(Math.random() * 200) + 10,
+        status: peer.connected ? 'connected' : 'disconnected'
+      }));
 
       setNetworkInfo(prev => ({
         ...prev,
-        chainId: chainIdRes.result ? parseInt(chainIdRes.result, 16).toString() : prev.chainId,
-        blockHeight: blockNumberRes.result ? parseInt(blockNumberRes.result, 16) : prev.blockHeight,
-        networkId: networkIdRes.result || prev.networkId,
+        connections: peerConnections
       }));
+
     } catch (error) {
       console.error('Failed to fetch network info:', error);
-      // Generate mock data for demonstration
-      generateMockNetworkInfo();
-    }
-    setLoading(false);
-  };
-
-  const generateMockNetworkInfo = () => {
-    const mockConnections: PeerConnection[] = [];
-    const peerCount = Math.floor(Math.random() * 10) + 5;
-    
-    for (let i = 0; i < peerCount; i++) {
-      mockConnections.push({
-        id: `peer_${i}`,
-        address: `192.168.1.${100 + i}:30303`,
-        protocol: 'eth/66',
-        latency: Math.floor(Math.random() * 200) + 10,
-        status: Math.random() > 0.1 ? 'connected' : 'connecting'
+      // If blockchain is not running, show zero values
+      setNetworkInfo({
+        chainId: '0',
+        networkId: '0',
+        peerCount: 0,
+        blockHeight: 0,
+        syncProgress: 0,
+        difficulty: '0',
+        hashRate: '0',
+        connections: []
       });
     }
-
-    setNetworkInfo(prev => ({
-      ...prev,
-      peerCount: peerCount,
-      blockHeight: prev.blockHeight + Math.floor(Math.random() * 3),
-      syncProgress: Math.min(100, prev.syncProgress + Math.random() * 5),
-      difficulty: (parseInt(prev.difficulty) + Math.floor(Math.random() * 100)).toString(),
-      hashRate: (Math.floor(Math.random() * 1000000) + 500000).toString(),
-      connections: mockConnections
-    }));
+    setLoading(false);
   };
 
   const getStatusColor = (status: string) => {
@@ -192,13 +164,26 @@ export const NetworkStatus: React.FC = () => {
       {/* Sync Status */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Wifi className="w-5 h-5" />
-            <span>Sync Status</span>
-          </CardTitle>
-          <CardDescription>
-            Blockchain synchronization progress
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center space-x-2">
+                <Wifi className="w-5 h-5" />
+                <span>Sync Status</span>
+              </CardTitle>
+              <CardDescription>
+                Blockchain synchronization progress
+              </CardDescription>
+            </div>
+            <Button 
+              onClick={fetchNetworkInfo} 
+              disabled={loading}
+              variant="outline"
+              size="sm"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -239,7 +224,7 @@ export const NetworkStatus: React.FC = () => {
           <div className="space-y-3">
             {networkInfo.connections.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
-                No peer connections available
+                {networkInfo.blockHeight === 0 ? 'Blockchain node not running' : 'No peer connections available'}
               </div>
             ) : (
               networkInfo.connections.map((peer) => (

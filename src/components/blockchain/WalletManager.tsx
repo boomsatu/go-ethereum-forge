@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Wallet, Plus, Key, Eye, EyeOff, Copy } from "lucide-react";
+import { Wallet, Plus, Key, Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
 import { blockchainService, WalletData } from '@/services/blockchainService';
 
 interface WalletAccount extends WalletData {
@@ -24,6 +24,7 @@ export const WalletManager: React.FC = () => {
   });
   const [selectedWallet, setSelectedWallet] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState<string>('');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -35,6 +36,7 @@ export const WalletManager: React.FC = () => {
     if (savedWallets) {
       const parsedWallets = JSON.parse(savedWallets);
       setWallets(parsedWallets);
+      // Refresh balances for all wallets
       parsedWallets.forEach((wallet: WalletAccount) => {
         refreshBalance(wallet.address);
       });
@@ -48,11 +50,13 @@ export const WalletManager: React.FC = () => {
   const createNewWallet = async () => {
     setLoading(true);
     try {
+      // Create wallet using real blockchain service
       const newWallet = await blockchainService.createWallet();
       if (newWallet) {
+        const nonce = await blockchainService.getNonce(newWallet.address);
         const walletWithNonce: WalletAccount = {
           ...newWallet,
-          nonce: 0
+          nonce
         };
 
         const updatedWallets = [...wallets, walletWithNonce];
@@ -68,14 +72,15 @@ export const WalletManager: React.FC = () => {
       } else {
         toast({
           title: "Creation Failed",
-          description: "Failed to create new wallet",
+          description: "Failed to create new wallet - blockchain node may not be running",
           variant: "destructive",
         });
       }
     } catch (error) {
+      console.error('Wallet creation error:', error);
       toast({
         title: "Creation Failed",
-        description: "Failed to create new wallet",
+        description: "Failed to create new wallet - check if blockchain node is running",
         variant: "destructive",
       });
     }
@@ -94,11 +99,13 @@ export const WalletManager: React.FC = () => {
 
     setLoading(true);
     try {
+      // Import wallet using real blockchain service
       const importedWallet = await blockchainService.importWallet(newWalletForm.privateKey);
       if (importedWallet) {
+        const nonce = await blockchainService.getNonce(importedWallet.address);
         const walletWithNonce: WalletAccount = {
           ...importedWallet,
-          nonce: await blockchainService.getNonce(importedWallet.address)
+          nonce
         };
 
         const updatedWallets = [...wallets, walletWithNonce];
@@ -116,14 +123,15 @@ export const WalletManager: React.FC = () => {
       } else {
         toast({
           title: "Import Failed",
-          description: "Failed to import wallet",
+          description: "Failed to import wallet - check private key format or blockchain connection",
           variant: "destructive",
         });
       }
     } catch (error) {
+      console.error('Wallet import error:', error);
       toast({
         title: "Import Failed",
-        description: "Failed to import wallet",
+        description: "Failed to import wallet - check private key format or blockchain connection",
         variant: "destructive",
       });
     }
@@ -131,7 +139,9 @@ export const WalletManager: React.FC = () => {
   };
 
   const refreshBalance = async (address: string) => {
+    setRefreshing(address);
     try {
+      // Get real balance and nonce from blockchain
       const [balance, nonce] = await Promise.all([
         blockchainService.getBalance(address),
         blockchainService.getNonce(address)
@@ -144,9 +154,56 @@ export const WalletManager: React.FC = () => {
       );
       setWallets(updatedWallets);
       saveWallets(updatedWallets);
+
+      toast({
+        title: "Balance Updated",
+        description: `Wallet ${address.slice(0, 10)}... balance: ${balance} ETH`,
+      });
     } catch (error) {
       console.error('Failed to refresh balance:', error);
+      toast({
+        title: "Refresh Failed",
+        description: "Failed to refresh balance - check blockchain connection",
+        variant: "destructive",
+      });
     }
+    setRefreshing('');
+  };
+
+  const refreshAllBalances = async () => {
+    setLoading(true);
+    try {
+      const updatedWallets = await Promise.all(
+        wallets.map(async (wallet) => {
+          try {
+            const [balance, nonce] = await Promise.all([
+              blockchainService.getBalance(wallet.address),
+              blockchainService.getNonce(wallet.address)
+            ]);
+            return { ...wallet, balance, nonce };
+          } catch (error) {
+            console.error(`Failed to refresh wallet ${wallet.address}:`, error);
+            return wallet;
+          }
+        })
+      );
+      
+      setWallets(updatedWallets);
+      saveWallets(updatedWallets);
+
+      toast({
+        title: "Balances Refreshed",
+        description: "All wallet balances have been updated",
+      });
+    } catch (error) {
+      console.error('Failed to refresh all balances:', error);
+      toast({
+        title: "Refresh Failed",
+        description: "Failed to refresh balances - check blockchain connection",
+        variant: "destructive",
+      });
+    }
+    setLoading(false);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -192,7 +249,7 @@ export const WalletManager: React.FC = () => {
             <span>Wallet Manager</span>
           </CardTitle>
           <CardDescription>
-            Create, import, and manage your blockchain wallets
+            Create, import, and manage your blockchain wallets with real data
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -242,10 +299,25 @@ export const WalletManager: React.FC = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Wallet Accounts</CardTitle>
-          <CardDescription>
-            Manage your wallet accounts and view balances
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Wallet Accounts</CardTitle>
+              <CardDescription>
+                Manage your wallet accounts and view real balances from blockchain
+              </CardDescription>
+            </div>
+            {wallets.length > 0 && (
+              <Button 
+                onClick={refreshAllBalances} 
+                disabled={loading}
+                variant="outline"
+                size="sm"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh All
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {wallets.length === 0 ? (
@@ -287,8 +359,9 @@ export const WalletManager: React.FC = () => {
                           onClick={() => refreshBalance(wallet.address)}
                           variant="ghost"
                           size="sm"
+                          disabled={refreshing === wallet.address}
                         >
-                          Refresh
+                          <RefreshCw className={`w-3 h-3 ${refreshing === wallet.address ? 'animate-spin' : ''}`} />
                         </Button>
                         <Button
                           onClick={() => setSelectedWallet(wallet.address)}
@@ -311,6 +384,7 @@ export const WalletManager: React.FC = () => {
         <Card>
           <CardHeader>
             <CardTitle>Wallet Details</CardTitle>
+            <CardDescription>Real wallet data from blockchain</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {wallets
@@ -357,16 +431,24 @@ export const WalletManager: React.FC = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <div className="text-sm font-semibold">Balance</div>
+                        <div className="text-sm font-semibold">Balance (Real)</div>
                         <p className="text-lg font-bold">{wallet.balance} ETH</p>
                       </div>
                       <div>
-                        <div className="text-sm font-semibold">Nonce</div>
+                        <div className="text-sm font-semibold">Nonce (Real)</div>
                         <p className="text-lg">{wallet.nonce}</p>
                       </div>
                     </div>
                   </div>
                   <div className="flex space-x-2">
+                    <Button 
+                      onClick={() => refreshBalance(wallet.address)}
+                      variant="outline"
+                      disabled={refreshing === wallet.address}
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-2 ${refreshing === wallet.address ? 'animate-spin' : ''}`} />
+                      Refresh Data
+                    </Button>
                     <Button 
                       onClick={() => setSelectedWallet('')}
                       variant="outline"
