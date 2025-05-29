@@ -7,68 +7,68 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Pickaxe, Play, Pause, Zap, Hash } from "lucide-react";
+import { Pickaxe, PlayCircle, StopCircle, Zap, Hash } from "lucide-react";
+import { blockchainService, MiningStats } from '@/services/blockchainService';
 
 interface MiningControlProps {
   connectionStatus: 'disconnected' | 'connecting' | 'connected';
 }
 
 export const MiningControl: React.FC<MiningControlProps> = ({ connectionStatus }) => {
-  const [miningStatus, setMiningStatus] = useState<'stopped' | 'running'>('stopped');
+  const [miningStats, setMiningStats] = useState<MiningStats>({
+    isActive: false,
+    hashRate: 0,
+    blocksFound: 0,
+    difficulty: '0'
+  });
   const [minerAddress, setMinerAddress] = useState('0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C');
-  const [difficulty, setDifficulty] = useState('1000');
-  const [hashRate, setHashRate] = useState(0);
-  const [minedBlocks, setMinedBlocks] = useState(0);
-  const [currentProgress, setCurrentProgress] = useState(0);
+  const [threads, setThreads] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (miningStatus === 'running') {
-      interval = setInterval(() => {
-        // Simulate mining progress
-        setCurrentProgress((prev) => {
-          const newProgress = prev + Math.random() * 10;
-          if (newProgress >= 100) {
-            setMinedBlocks(blocks => blocks + 1);
-            toast({
-              title: "Block Mined!",
-              description: `Successfully mined block #${minedBlocks + 1}`,
-            });
-            return 0;
-          }
-          return newProgress;
-        });
-        
-        // Update hash rate
-        setHashRate(Math.floor(Math.random() * 1000000) + 500000);
-      }, 1000);
+    if (connectionStatus === 'connected') {
+      fetchMiningStats();
+      const interval = setInterval(fetchMiningStats, 2000);
+      return () => clearInterval(interval);
     }
+  }, [connectionStatus]);
 
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [miningStatus, minedBlocks, toast]);
+  const fetchMiningStats = async () => {
+    try {
+      const stats = await blockchainService.getMiningStats();
+      if (stats) {
+        setMiningStats(stats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch mining stats:', error);
+    }
+  };
 
   const startMining = async () => {
-    try {
-      const response = await fetch('http://localhost:8545/api/mining/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          minerAddress,
-          difficulty: parseInt(difficulty)
-        }),
+    if (!minerAddress.trim()) {
+      toast({
+        title: "Invalid Miner Address",
+        description: "Please enter a valid miner address",
+        variant: "destructive",
       });
+      return;
+    }
 
-      if (response.ok) {
-        setMiningStatus('running');
+    setIsLoading(true);
+    try {
+      const success = await blockchainService.startMining(minerAddress, threads);
+      if (success) {
         toast({
           title: "Mining Started",
           description: "Mining process has been started",
+        });
+        await fetchMiningStats();
+      } else {
+        toast({
+          title: "Mining Start Failed",
+          description: "Failed to start mining process",
+          variant: "destructive",
         });
       }
     } catch (error) {
@@ -78,20 +78,26 @@ export const MiningControl: React.FC<MiningControlProps> = ({ connectionStatus }
         variant: "destructive",
       });
     }
+    setIsLoading(false);
   };
 
   const stopMining = async () => {
+    setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8545/api/mining/stop', {
-        method: 'POST',
-      });
-
-      setMiningStatus('stopped');
-      setCurrentProgress(0);
-      toast({
-        title: "Mining Stopped",
-        description: "Mining process has been stopped",
-      });
+      const success = await blockchainService.stopMining();
+      if (success) {
+        toast({
+          title: "Mining Stopped",
+          description: "Mining process has been stopped",
+        });
+        await fetchMiningStats();
+      } else {
+        toast({
+          title: "Mining Stop Failed",
+          description: "Failed to stop mining process",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       toast({
         title: "Mining Stop Failed",
@@ -99,26 +105,33 @@ export const MiningControl: React.FC<MiningControlProps> = ({ connectionStatus }
         variant: "destructive",
       });
     }
+    setIsLoading(false);
   };
 
   const mineManualBlock = async () => {
-    try {
-      const response = await fetch('http://localhost:8545/api/mining/mine-block', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          minerAddress
-        }),
+    if (!minerAddress.trim()) {
+      toast({
+        title: "Invalid Miner Address",
+        description: "Please enter a valid miner address",
+        variant: "destructive",
       });
+      return;
+    }
 
-      if (response.ok) {
-        const result = await response.json();
-        setMinedBlocks(blocks => blocks + 1);
+    setIsLoading(true);
+    try {
+      const result = await blockchainService.mineBlock(minerAddress);
+      if (result) {
         toast({
           title: "Manual Block Mined",
           description: `Block #${result.blockNumber} mined successfully`,
+        });
+        await fetchMiningStats();
+      } else {
+        toast({
+          title: "Manual Mining Failed",
+          description: "Failed to mine block manually",
+          variant: "destructive",
         });
       }
     } catch (error) {
@@ -128,6 +141,14 @@ export const MiningControl: React.FC<MiningControlProps> = ({ connectionStatus }
         variant: "destructive",
       });
     }
+    setIsLoading(false);
+  };
+
+  const formatHashRate = (hashRate: number) => {
+    if (hashRate >= 1000000000) return `${(hashRate / 1000000000).toFixed(2)} GH/s`;
+    if (hashRate >= 1000000) return `${(hashRate / 1000000).toFixed(2)} MH/s`;
+    if (hashRate >= 1000) return `${(hashRate / 1000).toFixed(2)} KH/s`;
+    return `${hashRate} H/s`;
   };
 
   return (
@@ -142,59 +163,46 @@ export const MiningControl: React.FC<MiningControlProps> = ({ connectionStatus }
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Mining Status */}
         <div className="grid grid-cols-3 gap-4 text-center">
           <div className="p-3 bg-gray-50 rounded-lg">
-            <div className="text-2xl font-bold text-blue-600">{minedBlocks}</div>
-            <div className="text-sm text-gray-600">Blocks Mined</div>
+            <div className="text-2xl font-bold text-blue-600">{miningStats.blocksFound}</div>
+            <div className="text-sm text-gray-600">Blocks Found</div>
           </div>
           <div className="p-3 bg-gray-50 rounded-lg">
             <div className="text-2xl font-bold text-green-600">
-              {hashRate.toLocaleString()}
+              {formatHashRate(miningStats.hashRate)}
             </div>
-            <div className="text-sm text-gray-600">H/s</div>
+            <div className="text-sm text-gray-600">Hash Rate</div>
           </div>
           <div className="p-3 bg-gray-50 rounded-lg">
             <div className="text-2xl font-bold text-purple-600">
-              {miningStatus === 'running' ? 'Active' : 'Stopped'}
+              {miningStats.isActive ? 'Active' : 'Stopped'}
             </div>
             <div className="text-sm text-gray-600">Status</div>
           </div>
         </div>
 
-        {/* Mining Progress */}
-        {miningStatus === 'running' && (
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>Block Mining Progress</span>
-              <span>{Math.round(currentProgress)}%</span>
-            </div>
-            <Progress value={currentProgress} className="w-full" />
-          </div>
-        )}
-
-        {/* Control Buttons */}
         <div className="grid grid-cols-3 gap-3">
           <Button 
             onClick={startMining}
-            disabled={miningStatus === 'running' || connectionStatus !== 'connected'}
+            disabled={miningStats.isActive || connectionStatus !== 'connected' || isLoading}
             className="w-full"
           >
-            <Play className="w-4 h-4 mr-2" />
+            <PlayCircle className="w-4 h-4 mr-2" />
             Start Mining
           </Button>
           <Button 
             onClick={stopMining}
-            disabled={miningStatus === 'stopped'}
+            disabled={!miningStats.isActive || isLoading}
             variant="destructive"
             className="w-full"
           >
-            <Pause className="w-4 h-4 mr-2" />
+            <StopCircle className="w-4 h-4 mr-2" />
             Stop Mining
           </Button>
           <Button 
             onClick={mineManualBlock}
-            disabled={connectionStatus !== 'connected'}
+            disabled={connectionStatus !== 'connected' || isLoading}
             variant="outline"
             className="w-full"
           >
@@ -205,7 +213,6 @@ export const MiningControl: React.FC<MiningControlProps> = ({ connectionStatus }
 
         <Separator />
 
-        {/* Mining Configuration */}
         <div className="space-y-4">
           <div className="flex items-center space-x-2">
             <Hash className="w-4 h-4" />
@@ -223,14 +230,22 @@ export const MiningControl: React.FC<MiningControlProps> = ({ connectionStatus }
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="difficulty">Difficulty</Label>
+              <Label htmlFor="threads">Mining Threads</Label>
               <Input
-                id="difficulty"
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value)}
-                placeholder="1000"
+                id="threads"
+                value={threads}
+                onChange={(e) => setThreads(parseInt(e.target.value) || 1)}
+                placeholder="1"
                 type="number"
+                min="1"
+                max="16"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Current Difficulty</Label>
+              <div className="text-sm text-gray-600">
+                {parseInt(miningStats.difficulty).toLocaleString()}
+              </div>
             </div>
           </div>
         </div>

@@ -6,9 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { RefreshCw, Blocks, Clock, Hash } from "lucide-react";
+import { RefreshCw, Blocks, Hash } from "lucide-react";
+import { blockchainService, BlockData } from '@/services/blockchainService';
 
-interface Block {
+interface BlockMonitorProps {
+  limit?: number;
+}
+
+interface ProcessedBlock {
   number: number;
   hash: string;
   parentHash: string;
@@ -21,117 +26,49 @@ interface Block {
   size: number;
 }
 
-interface BlockMonitorProps {
-  limit?: number;
-}
-
 export const BlockMonitor: React.FC<BlockMonitorProps> = ({ limit }) => {
-  const [blocks, setBlocks] = useState<Block[]>([]);
+  const [blocks, setBlocks] = useState<ProcessedBlock[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
+  const [selectedBlock, setSelectedBlock] = useState<ProcessedBlock | null>(null);
 
   useEffect(() => {
     fetchBlocks();
-    const interval = setInterval(fetchBlocks, 10000); // Refresh every 10 seconds
+    const interval = setInterval(fetchBlocks, 10000);
     return () => clearInterval(interval);
   }, [limit]);
 
   const fetchBlocks = async () => {
     setLoading(true);
     try {
-      // Get latest block number
-      const blockNumberResponse = await fetch('http://localhost:8545', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_blockNumber',
-          params: [],
-          id: 1,
-        }),
-      });
-
-      const blockNumberResult = await blockNumberResponse.json();
-      const latestBlockNumber = parseInt(blockNumberResult.result, 16);
-
-      // Fetch recent blocks
-      const blocksToFetch = limit || 20;
-      const startBlock = Math.max(0, latestBlockNumber - blocksToFetch + 1);
-      
-      const blockPromises = [];
-      for (let i = startBlock; i <= latestBlockNumber; i++) {
-        blockPromises.push(fetchBlock(i));
+      const latestBlock = await blockchainService.getLatestBlock();
+      if (latestBlock) {
+        const latestBlockNumber = parseInt(latestBlock.number, 16);
+        const blocksToFetch = limit || 20;
+        const startBlock = Math.max(0, latestBlockNumber - blocksToFetch + 1);
+        
+        const blockData = await blockchainService.getBlocks(startBlock, latestBlockNumber);
+        const processedBlocks = blockData.map(block => processBlock(block)).reverse();
+        setBlocks(processedBlocks);
       }
-
-      const fetchedBlocks = await Promise.all(blockPromises);
-      setBlocks(fetchedBlocks.filter(block => block !== null).reverse());
     } catch (error) {
       console.error('Failed to fetch blocks:', error);
-      // Generate mock data for demonstration
-      generateMockBlocks();
     }
     setLoading(false);
   };
 
-  const fetchBlock = async (blockNumber: number): Promise<Block | null> => {
-    try {
-      const response = await fetch('http://localhost:8545', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_getBlockByNumber',
-          params: [`0x${blockNumber.toString(16)}`, true],
-          id: 1,
-        }),
-      });
-
-      const result = await response.json();
-      if (result.result) {
-        const block = result.result;
-        return {
-          number: parseInt(block.number, 16),
-          hash: block.hash,
-          parentHash: block.parentHash,
-          timestamp: parseInt(block.timestamp, 16),
-          transactionCount: block.transactions.length,
-          gasUsed: parseInt(block.gasUsed, 16).toLocaleString(),
-          gasLimit: parseInt(block.gasLimit, 16).toLocaleString(),
-          difficulty: parseInt(block.difficulty, 16).toLocaleString(),
-          miner: block.miner || '0x0000000000000000000000000000000000000000',
-          size: parseInt(block.size || '0x0', 16),
-        };
-      }
-    } catch (error) {
-      console.error(`Failed to fetch block ${blockNumber}:`, error);
-    }
-    return null;
-  };
-
-  const generateMockBlocks = () => {
-    const mockBlocks: Block[] = [];
-    const now = Date.now();
-    
-    for (let i = 0; i < (limit || 10); i++) {
-      mockBlocks.push({
-        number: i + 1,
-        hash: `0x${Math.random().toString(16).slice(2, 66)}`,
-        parentHash: `0x${Math.random().toString(16).slice(2, 66)}`,
-        timestamp: Math.floor((now - i * 15000) / 1000),
-        transactionCount: Math.floor(Math.random() * 20),
-        gasUsed: (Math.floor(Math.random() * 8000000)).toLocaleString(),
-        gasLimit: '8,000,000',
-        difficulty: (1000 + i * 100).toLocaleString(),
-        miner: '0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C',
-        size: Math.floor(Math.random() * 10000) + 1000,
-      });
-    }
-    
-    setBlocks(mockBlocks.reverse());
+  const processBlock = (block: BlockData): ProcessedBlock => {
+    return {
+      number: parseInt(block.number, 16),
+      hash: block.hash,
+      parentHash: block.parentHash,
+      timestamp: parseInt(block.timestamp, 16),
+      transactionCount: Array.isArray(block.transactions) ? block.transactions.length : 0,
+      gasUsed: parseInt(block.gasUsed, 16).toLocaleString(),
+      gasLimit: parseInt(block.gasLimit, 16).toLocaleString(),
+      difficulty: parseInt(block.difficulty, 16).toLocaleString(),
+      miner: block.miner || '0x0000000000000000000000000000000000000000',
+      size: parseInt(block.size, 16),
+    };
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -213,7 +150,6 @@ export const BlockMonitor: React.FC<BlockMonitorProps> = ({ limit }) => {
         </CardContent>
       </Card>
 
-      {/* Block Details Modal/Card */}
       {selectedBlock && (
         <Card>
           <CardHeader>
@@ -225,35 +161,35 @@ export const BlockMonitor: React.FC<BlockMonitorProps> = ({ limit }) => {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-sm font-semibold">Hash</Label>
+                <div className="text-sm font-semibold">Hash</div>
                 <p className="font-mono text-sm break-all">{selectedBlock.hash}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Parent Hash</Label>
+                <div className="text-sm font-semibold">Parent Hash</div>
                 <p className="font-mono text-sm break-all">{selectedBlock.parentHash}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Miner</Label>
+                <div className="text-sm font-semibold">Miner</div>
                 <p className="font-mono text-sm">{selectedBlock.miner}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Difficulty</Label>
+                <div className="text-sm font-semibold">Difficulty</div>
                 <p className="text-sm">{selectedBlock.difficulty}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Gas Limit</Label>
+                <div className="text-sm font-semibold">Gas Limit</div>
                 <p className="text-sm">{selectedBlock.gasLimit}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Gas Used</Label>
+                <div className="text-sm font-semibold">Gas Used</div>
                 <p className="text-sm">{selectedBlock.gasUsed}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Size</Label>
+                <div className="text-sm font-semibold">Size</div>
                 <p className="text-sm">{selectedBlock.size.toLocaleString()} bytes</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Timestamp</Label>
+                <div className="text-sm font-semibold">Timestamp</div>
                 <p className="text-sm">{formatTimestamp(selectedBlock.timestamp)}</p>
               </div>
             </div>
@@ -270,8 +206,3 @@ export const BlockMonitor: React.FC<BlockMonitorProps> = ({ limit }) => {
     </div>
   );
 };
-
-// Add Label component for consistency
-const Label: React.FC<{ className?: string; children: React.ReactNode }> = ({ className, children }) => (
-  <div className={`text-sm font-medium ${className}`}>{children}</div>
-);

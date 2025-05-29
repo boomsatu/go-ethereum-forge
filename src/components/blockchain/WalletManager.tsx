@@ -9,11 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { Wallet, Plus, Key, Eye, EyeOff, Copy } from "lucide-react";
+import { blockchainService, WalletData } from '@/services/blockchainService';
 
-interface WalletAccount {
-  address: string;
-  privateKey: string;
-  balance: string;
+interface WalletAccount extends WalletData {
   nonce: number;
 }
 
@@ -25,6 +23,7 @@ export const WalletManager: React.FC = () => {
     importing: false
   });
   const [selectedWallet, setSelectedWallet] = useState<string>('');
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -32,77 +31,55 @@ export const WalletManager: React.FC = () => {
   }, []);
 
   const loadWallets = () => {
-    // Load wallets from localStorage or generate mock wallets
     const savedWallets = localStorage.getItem('blockchain-wallets');
     if (savedWallets) {
-      setWallets(JSON.parse(savedWallets));
-    } else {
-      generateMockWallets();
+      const parsedWallets = JSON.parse(savedWallets);
+      setWallets(parsedWallets);
+      parsedWallets.forEach((wallet: WalletAccount) => {
+        refreshBalance(wallet.address);
+      });
     }
   };
 
-  const generateMockWallets = () => {
-    const mockWallets: WalletAccount[] = [
-      {
-        address: '0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C',
-        privateKey: '0x' + '1'.repeat(64),
-        balance: '10.5',
-        nonce: 5
-      },
-      {
-        address: '0x8ba1f109551bD432803012645Hac136c54f2fA1',
-        privateKey: '0x' + '2'.repeat(64),
-        balance: '25.3',
-        nonce: 12
-      }
-    ];
-    setWallets(mockWallets);
-    localStorage.setItem('blockchain-wallets', JSON.stringify(mockWallets));
+  const saveWallets = (walletsToSave: WalletAccount[]) => {
+    localStorage.setItem('blockchain-wallets', JSON.stringify(walletsToSave));
   };
 
   const createNewWallet = async () => {
+    setLoading(true);
     try {
-      // In real implementation, this would call the Go backend to create a wallet
-      const response = await fetch('http://localhost:8545/api/wallet/create', {
-        method: 'POST',
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const newWallet: WalletAccount = {
-          address: result.address,
-          privateKey: result.privateKey,
-          balance: '0.0',
+      const newWallet = await blockchainService.createWallet();
+      if (newWallet) {
+        const walletWithNonce: WalletAccount = {
+          ...newWallet,
           nonce: 0
         };
 
-        const updatedWallets = [...wallets, newWallet];
+        const updatedWallets = [...wallets, walletWithNonce];
         setWallets(updatedWallets);
-        localStorage.setItem('blockchain-wallets', JSON.stringify(updatedWallets));
+        saveWallets(updatedWallets);
 
         toast({
           title: "Wallet Created",
-          description: `New wallet created with address ${result.address.slice(0, 10)}...`,
+          description: `New wallet created with address ${newWallet.address.slice(0, 10)}...`,
+        });
+
+        await refreshBalance(newWallet.address);
+      } else {
+        toast({
+          title: "Creation Failed",
+          description: "Failed to create new wallet",
+          variant: "destructive",
         });
       }
     } catch (error) {
-      // Generate mock wallet for demonstration
-      const mockWallet: WalletAccount = {
-        address: `0x${Math.random().toString(16).slice(2, 42)}`,
-        privateKey: `0x${Math.random().toString(16).slice(2, 66)}`,
-        balance: '0.0',
-        nonce: 0
-      };
-
-      const updatedWallets = [...wallets, mockWallet];
-      setWallets(updatedWallets);
-      localStorage.setItem('blockchain-wallets', JSON.stringify(updatedWallets));
-
       toast({
-        title: "Wallet Created",
-        description: `New wallet created with address ${mockWallet.address.slice(0, 10)}...`,
+        title: "Creation Failed",
+        description: "Failed to create new wallet",
+        variant: "destructive",
       });
     }
+    setLoading(false);
   };
 
   const importWallet = async () => {
@@ -115,26 +92,34 @@ export const WalletManager: React.FC = () => {
       return;
     }
 
+    setLoading(true);
     try {
-      // In real implementation, this would validate and import the wallet
-      const mockAddress = `0x${Math.random().toString(16).slice(2, 42)}`;
-      const importedWallet: WalletAccount = {
-        address: mockAddress,
-        privateKey: newWalletForm.privateKey,
-        balance: (Math.random() * 100).toFixed(6),
-        nonce: Math.floor(Math.random() * 50)
-      };
+      const importedWallet = await blockchainService.importWallet(newWalletForm.privateKey);
+      if (importedWallet) {
+        const walletWithNonce: WalletAccount = {
+          ...importedWallet,
+          nonce: await blockchainService.getNonce(importedWallet.address)
+        };
 
-      const updatedWallets = [...wallets, importedWallet];
-      setWallets(updatedWallets);
-      localStorage.setItem('blockchain-wallets', JSON.stringify(updatedWallets));
+        const updatedWallets = [...wallets, walletWithNonce];
+        setWallets(updatedWallets);
+        saveWallets(updatedWallets);
 
-      setNewWalletForm({ privateKey: '', importing: false });
+        setNewWalletForm({ privateKey: '', importing: false });
 
-      toast({
-        title: "Wallet Imported",
-        description: `Wallet imported with address ${mockAddress.slice(0, 10)}...`,
-      });
+        toast({
+          title: "Wallet Imported",
+          description: `Wallet imported with address ${importedWallet.address.slice(0, 10)}...`,
+        });
+
+        await refreshBalance(importedWallet.address);
+      } else {
+        toast({
+          title: "Import Failed",
+          description: "Failed to import wallet",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       toast({
         title: "Import Failed",
@@ -142,52 +127,26 @@ export const WalletManager: React.FC = () => {
         variant: "destructive",
       });
     }
+    setLoading(false);
   };
 
   const refreshBalance = async (address: string) => {
     try {
-      const response = await fetch('http://localhost:8545', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_getBalance',
-          params: [address, 'latest'],
-          id: 1,
-        }),
-      });
-
-      const result = await response.json();
-      if (result.result) {
-        const balanceWei = parseInt(result.result, 16);
-        const balanceEth = (balanceWei / 1e18).toFixed(6);
-        
-        const updatedWallets = wallets.map(wallet => 
-          wallet.address === address 
-            ? { ...wallet, balance: balanceEth }
-            : wallet
-        );
-        setWallets(updatedWallets);
-        localStorage.setItem('blockchain-wallets', JSON.stringify(updatedWallets));
-      }
-    } catch (error) {
-      // Generate random balance for demonstration
-      const randomBalance = (Math.random() * 100).toFixed(6);
+      const [balance, nonce] = await Promise.all([
+        blockchainService.getBalance(address),
+        blockchainService.getNonce(address)
+      ]);
+      
       const updatedWallets = wallets.map(wallet => 
         wallet.address === address 
-          ? { ...wallet, balance: randomBalance }
+          ? { ...wallet, balance, nonce }
           : wallet
       );
       setWallets(updatedWallets);
-      localStorage.setItem('blockchain-wallets', JSON.stringify(updatedWallets));
+      saveWallets(updatedWallets);
+    } catch (error) {
+      console.error('Failed to refresh balance:', error);
     }
-
-    toast({
-      title: "Balance Updated",
-      description: `Balance refreshed for ${address.slice(0, 10)}...`,
-    });
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -212,7 +171,11 @@ export const WalletManager: React.FC = () => {
   const deleteWallet = (address: string) => {
     const updatedWallets = wallets.filter(wallet => wallet.address !== address);
     setWallets(updatedWallets);
-    localStorage.setItem('blockchain-wallets', JSON.stringify(updatedWallets));
+    saveWallets(updatedWallets);
+    
+    if (selectedWallet === address) {
+      setSelectedWallet('');
+    }
     
     toast({
       title: "Wallet Removed",
@@ -222,7 +185,6 @@ export const WalletManager: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Wallet Actions */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
@@ -234,9 +196,8 @@ export const WalletManager: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Create/Import Buttons */}
           <div className="grid grid-cols-2 gap-4">
-            <Button onClick={createNewWallet} className="w-full">
+            <Button onClick={createNewWallet} className="w-full" disabled={loading}>
               <Plus className="w-4 h-4 mr-2" />
               Create New Wallet
             </Button>
@@ -250,7 +211,6 @@ export const WalletManager: React.FC = () => {
             </Button>
           </div>
 
-          {/* Import Form */}
           {newWalletForm.importing && (
             <>
               <Separator />
@@ -264,7 +224,7 @@ export const WalletManager: React.FC = () => {
                   onChange={(e) => setNewWalletForm({...newWalletForm, privateKey: e.target.value})}
                 />
                 <div className="flex space-x-2">
-                  <Button onClick={importWallet} className="flex-1">
+                  <Button onClick={importWallet} className="flex-1" disabled={loading}>
                     Import
                   </Button>
                   <Button 
@@ -280,7 +240,6 @@ export const WalletManager: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Wallet List */}
       <Card>
         <CardHeader>
           <CardTitle>Wallet Accounts</CardTitle>
@@ -289,60 +248,65 @@ export const WalletManager: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Address</TableHead>
-                <TableHead>Balance (ETH)</TableHead>
-                <TableHead>Nonce</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {wallets.map((wallet) => (
-                <TableRow key={wallet.address}>
-                  <TableCell>
-                    <div className="flex items-center space-x-2">
-                      <span className="font-mono text-sm">{truncateHash(wallet.address)}</span>
-                      <Button
-                        onClick={() => copyToClipboard(wallet.address, 'Address')}
-                        variant="ghost"
-                        size="sm"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{wallet.balance} ETH</Badge>
-                  </TableCell>
-                  <TableCell>{wallet.nonce}</TableCell>
-                  <TableCell>
-                    <div className="flex space-x-1">
-                      <Button
-                        onClick={() => refreshBalance(wallet.address)}
-                        variant="ghost"
-                        size="sm"
-                      >
-                        Refresh
-                      </Button>
-                      <Button
-                        onClick={() => setSelectedWallet(wallet.address)}
-                        variant="ghost"
-                        size="sm"
-                      >
-                        Details
-                      </Button>
-                    </div>
-                  </TableCell>
+          {wallets.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              No wallets found. Create or import a wallet to get started.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Balance (ETH)</TableHead>
+                  <TableHead>Nonce</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {wallets.map((wallet) => (
+                  <TableRow key={wallet.address}>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-mono text-sm">{truncateHash(wallet.address)}</span>
+                        <Button
+                          onClick={() => copyToClipboard(wallet.address, 'Address')}
+                          variant="ghost"
+                          size="sm"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{wallet.balance} ETH</Badge>
+                    </TableCell>
+                    <TableCell>{wallet.nonce}</TableCell>
+                    <TableCell>
+                      <div className="flex space-x-1">
+                        <Button
+                          onClick={() => refreshBalance(wallet.address)}
+                          variant="ghost"
+                          size="sm"
+                        >
+                          Refresh
+                        </Button>
+                        <Button
+                          onClick={() => setSelectedWallet(wallet.address)}
+                          variant="ghost"
+                          size="sm"
+                        >
+                          Details
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
-      {/* Wallet Details */}
       {selectedWallet && (
         <Card>
           <CardHeader>
@@ -355,7 +319,7 @@ export const WalletManager: React.FC = () => {
                 <div key={wallet.address} className="space-y-4">
                   <div className="grid grid-cols-1 gap-4">
                     <div>
-                      <Label className="text-sm font-semibold">Address</Label>
+                      <div className="text-sm font-semibold">Address</div>
                       <div className="flex items-center space-x-2">
                         <p className="font-mono text-sm break-all">{wallet.address}</p>
                         <Button
@@ -368,7 +332,7 @@ export const WalletManager: React.FC = () => {
                       </div>
                     </div>
                     <div>
-                      <Label className="text-sm font-semibold">Private Key</Label>
+                      <div className="text-sm font-semibold">Private Key</div>
                       <div className="flex items-center space-x-2">
                         <p className="font-mono text-sm break-all">
                           {showPrivateKeys[wallet.address] ? wallet.privateKey : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'}
@@ -393,11 +357,11 @@ export const WalletManager: React.FC = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label className="text-sm font-semibold">Balance</Label>
+                        <div className="text-sm font-semibold">Balance</div>
                         <p className="text-lg font-bold">{wallet.balance} ETH</p>
                       </div>
                       <div>
-                        <Label className="text-sm font-semibold">Nonce</Label>
+                        <div className="text-sm font-semibold">Nonce</div>
                         <p className="text-lg">{wallet.nonce}</p>
                       </div>
                     </div>

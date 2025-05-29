@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { PlayCircle, StopCircle, RotateCcw, Settings } from "lucide-react";
+import { blockchainService, BlockchainConfig } from '@/services/blockchainService';
 
 interface BlockchainControlProps {
   nodeStatus: 'stopped' | 'starting' | 'running' | 'error';
@@ -19,13 +20,25 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
   setNodeStatus,
   connectionStatus
 }) => {
-  const [config, setConfig] = useState({
-    port: '8545',
+  const [config, setConfig] = useState<BlockchainConfig>({
+    host: 'localhost',
+    port: 8545,
     chainId: '1337',
     gasLimit: '8000000',
     dataDir: './data'
   });
   const { toast } = useToast();
+
+  useEffect(() => {
+    loadCurrentConfig();
+  }, []);
+
+  const loadCurrentConfig = async () => {
+    const status = await blockchainService.getNodeStatus();
+    if (status && status.config) {
+      setConfig(status.config);
+    }
+  };
 
   const startNode = async () => {
     setNodeStatus('starting');
@@ -35,14 +48,21 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
     });
 
     try {
-      // Simulate node startup - in real implementation, this would call the Go backend
-      setTimeout(() => {
+      const success = await blockchainService.startNode(config);
+      if (success) {
         setNodeStatus('running');
         toast({
           title: "Node Started",
           description: "Blockchain node is now running",
         });
-      }, 3000);
+      } else {
+        setNodeStatus('error');
+        toast({
+          title: "Start Failed",
+          description: "Failed to start blockchain node",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       setNodeStatus('error');
       toast({
@@ -55,15 +75,20 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
 
   const stopNode = async () => {
     try {
-      const response = await fetch('http://localhost:8545/api/admin/stop', {
-        method: 'POST',
-      });
-      
-      setNodeStatus('stopped');
-      toast({
-        title: "Node Stopped",
-        description: "Blockchain node has been stopped",
-      });
+      const success = await blockchainService.stopNode();
+      if (success) {
+        setNodeStatus('stopped');
+        toast({
+          title: "Node Stopped",
+          description: "Blockchain node has been stopped",
+        });
+      } else {
+        toast({
+          title: "Stop Failed",
+          description: "Failed to stop blockchain node",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       toast({
         title: "Stop Failed",
@@ -82,18 +107,17 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
 
   const updateConfig = async () => {
     try {
-      const response = await fetch('http://localhost:8545/api/admin/config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(config),
-      });
-
-      if (response.ok) {
+      const success = await blockchainService.updateConfig(config);
+      if (success) {
         toast({
           title: "Configuration Updated",
           description: "Node configuration has been updated",
+        });
+      } else {
+        toast({
+          title: "Update Failed",
+          description: "Failed to update configuration",
+          variant: "destructive",
         });
       }
     } catch (error) {
@@ -126,7 +150,6 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Node Control Buttons */}
         <div className="grid grid-cols-3 gap-3">
           <Button 
             onClick={startNode}
@@ -159,7 +182,6 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
 
         <Separator />
 
-        {/* Configuration */}
         <div className="space-y-4">
           <div className="flex items-center space-x-2">
             <Settings className="w-4 h-4" />
@@ -168,11 +190,21 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
           
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="port">RPC Port</Label>
+              <Label htmlFor="host">Host</Label>
+              <Input
+                id="host"
+                value={config.host}
+                onChange={(e) => setConfig({...config, host: e.target.value})}
+                placeholder="localhost"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="port">Port</Label>
               <Input
                 id="port"
+                type="number"
                 value={config.port}
-                onChange={(e) => setConfig({...config, port: e.target.value})}
+                onChange={(e) => setConfig({...config, port: parseInt(e.target.value) || 8545})}
                 placeholder="8545"
               />
             </div>
@@ -194,15 +226,15 @@ export const BlockchainControl: React.FC<BlockchainControlProps> = ({
                 placeholder="8000000"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="dataDir">Data Directory</Label>
-              <Input
-                id="dataDir"
-                value={config.dataDir}
-                onChange={(e) => setConfig({...config, dataDir: e.target.value})}
-                placeholder="./data"
-              />
-            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="dataDir">Data Directory</Label>
+            <Input
+              id="dataDir"
+              value={config.dataDir}
+              onChange={(e) => setConfig({...config, dataDir: e.target.value})}
+              placeholder="./data"
+            />
           </div>
 
           <Button 

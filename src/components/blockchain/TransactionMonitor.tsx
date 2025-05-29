@@ -9,8 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RefreshCw, Send, Search, Hash } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { blockchainService, TransactionData } from '@/services/blockchainService';
 
-interface Transaction {
+interface ProcessedTransaction {
   hash: string;
   from: string;
   to: string | null;
@@ -28,14 +29,15 @@ interface TransactionMonitorProps {
 }
 
 export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit }) => {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<ProcessedTransaction[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [selectedTx, setSelectedTx] = useState<ProcessedTransaction | null>(null);
   const [searchHash, setSearchHash] = useState('');
   const [sendTxForm, setSendTxForm] = useState({
+    from: '',
     to: '',
     value: '',
-    gasPrice: '20',
+    gasPrice: '20000000000',
     gasLimit: '21000',
     data: ''
   });
@@ -43,68 +45,71 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
 
   useEffect(() => {
     fetchTransactions();
-    const interval = setInterval(fetchTransactions, 15000); // Refresh every 15 seconds
+    const interval = setInterval(fetchTransactions, 15000);
     return () => clearInterval(interval);
   }, [limit]);
 
   const fetchTransactions = async () => {
     setLoading(true);
     try {
-      // In a real implementation, this would fetch from the blockchain
-      // For now, we'll generate mock data
-      generateMockTransactions();
+      const latestBlock = await blockchainService.getLatestBlock();
+      if (latestBlock) {
+        const latestBlockNumber = parseInt(latestBlock.number, 16);
+        const blocksToCheck = Math.min(10, latestBlockNumber + 1);
+        const allTransactions: ProcessedTransaction[] = [];
+
+        for (let i = Math.max(0, latestBlockNumber - blocksToCheck + 1); i <= latestBlockNumber; i++) {
+          const block = await blockchainService.getBlockByNumber(i, true);
+          if (block && Array.isArray(block.transactions)) {
+            for (const tx of block.transactions) {
+              if (typeof tx === 'object') {
+                const processedTx = processTransaction(tx as TransactionData, i);
+                allTransactions.push(processedTx);
+              }
+            }
+          }
+        }
+
+        allTransactions.sort((a, b) => b.timestamp - a.timestamp);
+        setTransactions(allTransactions.slice(0, limit || 50));
+      }
     } catch (error) {
       console.error('Failed to fetch transactions:', error);
-      generateMockTransactions();
     }
     setLoading(false);
   };
 
-  const generateMockTransactions = () => {
-    const mockTxs: Transaction[] = [];
-    const statuses: ('pending' | 'confirmed' | 'failed')[] = ['pending', 'confirmed', 'failed'];
-    const now = Date.now();
-    
-    for (let i = 0; i < (limit || 15); i++) {
-      const status = statuses[Math.floor(Math.random() * 3)];
-      mockTxs.push({
-        hash: `0x${Math.random().toString(16).slice(2, 66)}`,
-        from: `0x${Math.random().toString(16).slice(2, 42)}`,
-        to: Math.random() > 0.1 ? `0x${Math.random().toString(16).slice(2, 42)}` : null,
-        value: (Math.random() * 10).toFixed(6),
-        gasPrice: (20 + Math.random() * 80).toFixed(0),
-        gasLimit: '21000',
-        nonce: Math.floor(Math.random() * 100),
-        blockNumber: status === 'confirmed' ? Math.floor(Math.random() * 1000) + 1 : null,
-        status,
-        timestamp: Math.floor((now - i * 30000) / 1000),
-      });
-    }
-    
-    setTransactions(mockTxs);
+  const processTransaction = (tx: TransactionData, blockNumber: number): ProcessedTransaction => {
+    return {
+      hash: tx.hash,
+      from: tx.from,
+      to: tx.to,
+      value: (parseInt(tx.value, 16) / 1e18).toFixed(6),
+      gasPrice: (parseInt(tx.gasPrice, 16) / 1e9).toFixed(0),
+      gasLimit: parseInt(tx.gas, 16).toString(),
+      nonce: parseInt(tx.nonce, 16),
+      blockNumber: tx.blockNumber ? parseInt(tx.blockNumber, 16) : blockNumber,
+      status: tx.blockHash ? 'confirmed' : 'pending',
+      timestamp: Date.now() / 1000,
+    };
   };
 
   const searchTransaction = async () => {
-    if (!searchHash.trim()) return;
+    if (!searchHash.trim()) {
+      toast({
+        title: "Invalid Hash",
+        description: "Please enter a valid transaction hash",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8545', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_getTransactionByHash',
-          params: [searchHash],
-          id: 1,
-        }),
-      });
-
-      const result = await response.json();
-      if (result.result) {
-        // Process found transaction
+      const tx = await blockchainService.getTransaction(searchHash);
+      if (tx) {
+        const processedTx = processTransaction(tx, 0);
+        setSelectedTx(processedTx);
         toast({
           title: "Transaction Found",
           description: `Transaction ${searchHash.slice(0, 10)}... found`,
@@ -127,38 +132,48 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
   };
 
   const sendTransaction = async () => {
-    try {
-      // In real implementation, this would create and send a transaction
-      const mockTxHash = `0x${Math.random().toString(16).slice(2, 66)}`;
-      
-      const newTx: Transaction = {
-        hash: mockTxHash,
-        from: '0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C', // Mock sender
-        to: sendTxForm.to || null,
-        value: sendTxForm.value,
-        gasPrice: sendTxForm.gasPrice,
-        gasLimit: sendTxForm.gasLimit,
-        nonce: Math.floor(Math.random() * 100),
-        blockNumber: null,
-        status: 'pending',
-        timestamp: Math.floor(Date.now() / 1000),
-      };
-
-      setTransactions(prev => [newTx, ...prev]);
-      
+    if (!sendTxForm.from || !sendTxForm.to || !sendTxForm.value) {
       toast({
-        title: "Transaction Sent",
-        description: `Transaction ${mockTxHash.slice(0, 10)}... submitted to mempool`,
+        title: "Invalid Transaction",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const txHash = await blockchainService.sendTransaction({
+        from: sendTxForm.from,
+        to: sendTxForm.to,
+        value: `0x${(parseFloat(sendTxForm.value) * 1e18).toString(16)}`,
+        gas: `0x${parseInt(sendTxForm.gasLimit).toString(16)}`,
+        gasPrice: `0x${parseInt(sendTxForm.gasPrice).toString(16)}`,
+        data: sendTxForm.data || '0x',
       });
 
-      // Reset form
-      setSendTxForm({
-        to: '',
-        value: '',
-        gasPrice: '20',
-        gasLimit: '21000',
-        data: ''
-      });
+      if (txHash) {
+        toast({
+          title: "Transaction Sent",
+          description: `Transaction ${txHash.slice(0, 10)}... submitted`,
+        });
+        
+        setSendTxForm({
+          from: '',
+          to: '',
+          value: '',
+          gasPrice: '20000000000',
+          gasLimit: '21000',
+          data: ''
+        });
+        
+        setTimeout(fetchTransactions, 2000);
+      } else {
+        toast({
+          title: "Transaction Failed",
+          description: "Failed to send transaction",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       toast({
         title: "Transaction Failed",
@@ -196,7 +211,7 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
                 <span>Transaction Monitor</span>
               </CardTitle>
               <CardDescription>
-                Monitor transactions and mempool activity
+                Monitor transactions and blockchain activity
               </CardDescription>
             </div>
             <Button 
@@ -211,7 +226,6 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
           </div>
         </CardHeader>
         <CardContent>
-          {/* Search Transaction */}
           <div className="flex space-x-2 mb-4">
             <Input
               placeholder="Search by transaction hash..."
@@ -272,7 +286,6 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
         </CardContent>
       </Card>
 
-      {/* Send Transaction Form */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
@@ -282,6 +295,15 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="from">From Address</Label>
+              <Input
+                id="from"
+                placeholder="0x..."
+                value={sendTxForm.from}
+                onChange={(e) => setSendTxForm({...sendTxForm, from: e.target.value})}
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="to">To Address</Label>
               <Input
@@ -303,10 +325,10 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="gasPrice">Gas Price (Gwei)</Label>
+              <Label htmlFor="gasPrice">Gas Price (Wei)</Label>
               <Input
                 id="gasPrice"
-                placeholder="20"
+                placeholder="20000000000"
                 type="number"
                 value={sendTxForm.gasPrice}
                 onChange={(e) => setSendTxForm({...sendTxForm, gasPrice: e.target.value})}
@@ -322,15 +344,15 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
                 onChange={(e) => setSendTxForm({...sendTxForm, gasLimit: e.target.value})}
               />
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="data">Data (Hex)</Label>
-            <Input
-              id="data"
-              placeholder="0x..."
-              value={sendTxForm.data}
-              onChange={(e) => setSendTxForm({...sendTxForm, data: e.target.value})}
-            />
+            <div className="space-y-2">
+              <Label htmlFor="data">Data (Hex)</Label>
+              <Input
+                id="data"
+                placeholder="0x..."
+                value={sendTxForm.data}
+                onChange={(e) => setSendTxForm({...sendTxForm, data: e.target.value})}
+              />
+            </div>
           </div>
           <Button onClick={sendTransaction} className="w-full">
             Send Transaction
@@ -338,7 +360,6 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
         </CardContent>
       </Card>
 
-      {/* Transaction Details */}
       {selectedTx && (
         <Card>
           <CardHeader>
@@ -350,37 +371,37 @@ export const TransactionMonitor: React.FC<TransactionMonitorProps> = ({ limit })
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-sm font-semibold">Hash</Label>
+                <div className="text-sm font-semibold">Hash</div>
                 <p className="font-mono text-sm break-all">{selectedTx.hash}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Status</Label>
+                <div className="text-sm font-semibold">Status</div>
                 <Badge className={getStatusColor(selectedTx.status)}>
                   {selectedTx.status}
                 </Badge>
               </div>
               <div>
-                <Label className="text-sm font-semibold">From</Label>
+                <div className="text-sm font-semibold">From</div>
                 <p className="font-mono text-sm">{selectedTx.from}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">To</Label>
+                <div className="text-sm font-semibold">To</div>
                 <p className="font-mono text-sm">{selectedTx.to || 'Contract Creation'}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Value</Label>
+                <div className="text-sm font-semibold">Value</div>
                 <p className="text-sm">{selectedTx.value} ETH</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Gas Price</Label>
+                <div className="text-sm font-semibold">Gas Price</div>
                 <p className="text-sm">{selectedTx.gasPrice} Gwei</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Nonce</Label>
+                <div className="text-sm font-semibold">Nonce</div>
                 <p className="text-sm">{selectedTx.nonce}</p>
               </div>
               <div>
-                <Label className="text-sm font-semibold">Block Number</Label>
+                <div className="text-sm font-semibold">Block Number</div>
                 <p className="text-sm">{selectedTx.blockNumber || 'Pending'}</p>
               </div>
             </div>

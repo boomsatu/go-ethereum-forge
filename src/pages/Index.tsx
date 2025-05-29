@@ -12,7 +12,8 @@ import { TransactionMonitor } from "@/components/blockchain/TransactionMonitor";
 import { WalletManager } from "@/components/blockchain/WalletManager";
 import { NetworkStatus } from "@/components/blockchain/NetworkStatus";
 import { MetricsPanel } from "@/components/blockchain/MetricsPanel";
-import { Activity, Blocks, Wallet, Network, Settings, TrendingUp } from "lucide-react";
+import { Activity, Blocks, Wallet, Zap, Settings, TrendingUp } from "lucide-react";
+import { blockchainService } from '@/services/blockchainService';
 
 const Index = () => {
   const [nodeStatus, setNodeStatus] = useState<'stopped' | 'starting' | 'running' | 'error'>('stopped');
@@ -20,18 +21,15 @@ const Index = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check initial connection status
     checkNodeConnection();
-    
-    // Set up periodic health checks
     const interval = setInterval(checkNodeConnection, 5000);
     return () => clearInterval(interval);
   }, []);
 
   const checkNodeConnection = async () => {
     try {
-      const response = await fetch('http://localhost:8545/health');
-      if (response.ok) {
+      const health = await blockchainService.getHealthCheck();
+      if (health) {
         setConnectionStatus('connected');
         if (nodeStatus === 'starting') {
           setNodeStatus('running');
@@ -39,6 +37,8 @@ const Index = () => {
             title: "Node Connected",
             description: "Successfully connected to blockchain node",
           });
+        } else if (nodeStatus === 'stopped') {
+          setNodeStatus('running');
         }
       } else {
         setConnectionStatus('disconnected');
@@ -78,7 +78,6 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Blockchain Node Dashboard</h1>
@@ -95,7 +94,6 @@ const Index = () => {
           </div>
         </div>
 
-        {/* Main Dashboard */}
         <Tabs defaultValue="overview" className="space-y-6">
           <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="overview" className="flex items-center space-x-2">
@@ -115,7 +113,7 @@ const Index = () => {
               <span>Wallet</span>
             </TabsTrigger>
             <TabsTrigger value="network" className="flex items-center space-x-2">
-              <Network className="w-4 h-4" />
+              <Zap className="w-4 h-4" />
               <span>Network</span>
             </TabsTrigger>
             <TabsTrigger value="metrics" className="flex items-center space-x-2">
