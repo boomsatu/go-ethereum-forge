@@ -294,12 +294,12 @@ func (s *Server) ethGetTransactionByHash(params []interface{}) (interface{}, err
 	var hash [32]byte
 	copy(hash[:], hashBytes)
 	
-	// Check mempool first
+	// Check mempool first using our custom hash type
 	if tx := s.blockchain.GetMempool().GetTransaction(hash); tx != nil {
-		return s.formatTransaction(tx, &blockHash{}, 0, 0), nil
+		return s.formatTransaction(tx, nil, 0, 0), nil
 	}
 
-	// Search in blocks (this could be optimized with an index)
+	// Search in blocks
 	currentBlock := s.blockchain.GetCurrentBlock()
 	if currentBlock == nil {
 		return nil, nil
@@ -550,8 +550,6 @@ func (s *Server) formatReceipt(receipt *core.TransactionReceipt) map[string]inte
 		"logsBloom":         fmt.Sprintf("0x%x", receipt.LogsBloom),
 	}
 }
-
-type blockHash [32]byte
 
 func (s *Server) sendError(w http.ResponseWriter, id interface{}, code int, message string) {
 	response := JSONRPCResponse{

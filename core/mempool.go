@@ -4,20 +4,18 @@ package core
 import (
 	"errors"
 	"sync"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type Mempool struct {
-	transactions map[common.Hash]*Transaction
-	pending      map[common.Address][]*Transaction
+	transactions map[[32]byte]*Transaction
+	pending      map[[20]byte][]*Transaction
 	mu           sync.RWMutex
 }
 
 func NewMempool() *Mempool {
 	return &Mempool{
-		transactions: make(map[common.Hash]*Transaction),
-		pending:      make(map[common.Address][]*Transaction),
+		transactions: make(map[[32]byte]*Transaction),
+		pending:      make(map[[20]byte][]*Transaction),
 	}
 }
 
@@ -56,7 +54,7 @@ func (mp *Mempool) validateTransaction(tx *Transaction) error {
 	return nil
 }
 
-func (mp *Mempool) GetTransaction(hash common.Hash) *Transaction {
+func (mp *Mempool) GetTransaction(hash [32]byte) *Transaction {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 	return mp.transactions[hash]
@@ -73,7 +71,7 @@ func (mp *Mempool) GetPendingTransactions() []*Transaction {
 	return txs
 }
 
-func (mp *Mempool) RemoveTransaction(hash common.Hash) {
+func (mp *Mempool) RemoveTransaction(hash [32]byte) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -96,8 +94,8 @@ func (mp *Mempool) Clear() {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
-	mp.transactions = make(map[common.Hash]*Transaction)
-	mp.pending = make(map[common.Address][]*Transaction)
+	mp.transactions = make(map[[32]byte]*Transaction)
+	mp.pending = make(map[[20]byte][]*Transaction)
 }
 
 func (mp *Mempool) Size() int {
