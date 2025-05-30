@@ -6,23 +6,21 @@ import (
 	"encoding/json"
 	"math/big"
 	"time"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type BlockHeader struct {
 	Number       uint64      `json:"number"`
-	ParentHash   common.Hash `json:"parentHash"`
+	ParentHash   [32]byte    `json:"parentHash"`
 	Timestamp    int64       `json:"timestamp"`
-	StateRoot    common.Hash `json:"stateRoot"`
-	TxHash       common.Hash `json:"transactionsRoot"`
-	ReceiptHash  common.Hash `json:"receiptsRoot"`
+	StateRoot    [32]byte    `json:"stateRoot"`
+	TxHash       [32]byte    `json:"transactionsRoot"`
+	ReceiptHash  [32]byte    `json:"receiptsRoot"`
 	LogsBloom    []byte      `json:"logsBloom"`
 	GasLimit     uint64      `json:"gasLimit"`
 	GasUsed      uint64      `json:"gasUsed"`
 	Difficulty   *big.Int    `json:"difficulty"`
 	Nonce        uint64      `json:"nonce"`
-	Hash         common.Hash `json:"hash"`
+	Hash         [32]byte    `json:"hash"`
 }
 
 type Block struct {
@@ -31,7 +29,7 @@ type Block struct {
 	Receipts     []*TransactionReceipt  `json:"receipts"`
 }
 
-func NewBlock(parentHash common.Hash, number uint64, transactions []*Transaction) *Block {
+func NewBlock(parentHash [32]byte, number uint64, transactions []*Transaction) *Block {
 	header := &BlockHeader{
 		Number:     number,
 		ParentHash: parentHash,
@@ -49,10 +47,61 @@ func NewBlock(parentHash common.Hash, number uint64, transactions []*Transaction
 	return block
 }
 
-func (b *Block) CalculateHash() common.Hash {
-	// Serialize block header for hashing
-	data, _ := json.Marshal(b.Header)
-	return crypto.Keccak256Hash(data)
+func (b *Block) CalculateHash() [32]byte {
+	// Create hash data from header fields
+	data := make([]byte, 0, 256)
+	
+	// Number (8 bytes)
+	numberBytes := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		numberBytes[7-i] = byte(b.Header.Number >> (i * 8))
+	}
+	data = append(data, numberBytes...)
+	
+	// Parent hash
+	data = append(data, b.Header.ParentHash[:]...)
+	
+	// Timestamp (8 bytes)
+	timestampBytes := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		timestampBytes[7-i] = byte(b.Header.Timestamp >> (i * 8))
+	}
+	data = append(data, timestampBytes...)
+	
+	// State root
+	data = append(data, b.Header.StateRoot[:]...)
+	
+	// Transactions root
+	data = append(data, b.Header.TxHash[:]...)
+	
+	// Receipts root
+	data = append(data, b.Header.ReceiptHash[:]...)
+	
+	// Gas limit (8 bytes)
+	gasLimitBytes := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		gasLimitBytes[7-i] = byte(b.Header.GasLimit >> (i * 8))
+	}
+	data = append(data, gasLimitBytes...)
+	
+	// Gas used (8 bytes)
+	gasUsedBytes := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		gasUsedBytes[7-i] = byte(b.Header.GasUsed >> (i * 8))
+	}
+	data = append(data, gasUsedBytes...)
+	
+	// Difficulty
+	data = append(data, b.Header.Difficulty.Bytes()...)
+	
+	// Nonce (8 bytes)
+	nonceBytes := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		nonceBytes[7-i] = byte(b.Header.Nonce >> (i * 8))
+	}
+	data = append(data, nonceBytes...)
+	
+	return crypto.SHA256Hash(data)
 }
 
 func (b *Block) MineBlock(difficulty *big.Int) {

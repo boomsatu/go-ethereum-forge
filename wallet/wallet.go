@@ -2,18 +2,17 @@
 package wallet
 
 import (
+	"blockchain-node/core"
 	"blockchain-node/crypto"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type Wallet struct {
 	privateKey *ecdsa.PrivateKey
 	publicKey  *ecdsa.PublicKey
-	address    common.Address
+	address    [20]byte
 }
 
 func NewWallet() (*Wallet, error) {
@@ -37,7 +36,7 @@ func NewWalletFromPrivateKey(privateKeyHex string) (*Wallet, error) {
 		return nil, fmt.Errorf("invalid private key format: %v", err)
 	}
 
-	privateKey, err := ethCrypto.ToECDSA(privateKeyBytes)
+	privateKey, err := crypto.ToECDSA(privateKeyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %v", err)
 	}
@@ -53,10 +52,10 @@ func NewWalletFromPrivateKey(privateKeyHex string) (*Wallet, error) {
 }
 
 func (w *Wallet) GetAddress() string {
-	return w.address.Hex()
+	return hex.EncodeToString(w.address[:])
 }
 
-func (w *Wallet) GetAddressBytes() common.Address {
+func (w *Wallet) GetAddressBytes() [20]byte {
 	return w.address
 }
 
@@ -65,7 +64,7 @@ func (w *Wallet) GetPrivateKey() *ecdsa.PrivateKey {
 }
 
 func (w *Wallet) GetPrivateKeyHex() string {
-	return hex.EncodeToString(ethCrypto.FromECDSA(w.privateKey))
+	return hex.EncodeToString(crypto.FromECDSA(w.privateKey))
 }
 
 func (w *Wallet) GetPublicKey() *ecdsa.PublicKey {
@@ -73,20 +72,14 @@ func (w *Wallet) GetPublicKey() *ecdsa.PublicKey {
 }
 
 func (w *Wallet) GetPublicKeyHex() string {
-	return hex.EncodeToString(ethCrypto.FromECDSAPub(w.publicKey))
+	return hex.EncodeToString(crypto.FromECDSAPub(w.publicKey))
 }
 
 func (w *Wallet) SignData(data []byte) ([]byte, error) {
 	hash := crypto.Keccak256Hash(data)
-	return crypto.Sign(hash[:], ethCrypto.FromECDSA(w.privateKey))
+	return crypto.Sign(hash[:], crypto.FromECDSA(w.privateKey))
 }
 
 func (w *Wallet) SignTransaction(tx *core.Transaction) error {
-	return tx.Sign(ethCrypto.FromECDSA(w.privateKey))
+	return tx.Sign(crypto.FromECDSA(w.privateKey))
 }
-
-// Add missing imports
-import (
-	"blockchain-node/core"
-	ethCrypto "github.com/ethereum/go-ethereum/crypto"
-)

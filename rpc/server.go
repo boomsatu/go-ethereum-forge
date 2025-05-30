@@ -1,16 +1,16 @@
-
 package rpc
 
 import (
 	"blockchain-node/core"
+	"blockchain-node/security"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/gorilla/mux"
 )
 
@@ -22,6 +22,7 @@ type Config struct {
 type Server struct {
 	config     *Config
 	blockchain *core.Blockchain
+	security   *security.SecurityManager
 	server     *http.Server
 }
 
@@ -48,6 +49,7 @@ func NewServer(config *Config, blockchain *core.Blockchain) *Server {
 	return &Server{
 		config:     config,
 		blockchain: blockchain,
+		security:   security.NewSecurityManager(),
 	}
 }
 
@@ -162,7 +164,7 @@ func (s *Server) ethBlockNumber() (interface{}, error) {
 	if currentBlock == nil {
 		return "0x0", nil
 	}
-	return hexutil.EncodeUint64(currentBlock.Header.Number), nil
+	return fmt.Sprintf("0x%x", currentBlock.Header.Number), nil
 }
 
 func (s *Server) ethGetBalance(params []interface{}) (interface{}, error) {
@@ -170,10 +172,17 @@ func (s *Server) ethGetBalance(params []interface{}) (interface{}, error) {
 		return nil, fmt.Errorf("missing address parameter")
 	}
 
-	address := common.HexToAddress(params[0].(string))
-	balance := s.blockchain.GetStateDB().GetBalance(address)
+	addressStr := params[0].(string)
+	addressBytes, err := hex.DecodeString(strings.TrimPrefix(addressStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid address format")
+	}
 	
-	return hexutil.EncodeBig(balance), nil
+	var address [20]byte
+	copy(address[:], addressBytes)
+	
+	balance := s.blockchain.GetStateDB().GetBalance(address)
+	return fmt.Sprintf("0x%x", balance), nil
 }
 
 func (s *Server) ethGetBlockByNumber(params []interface{}) (interface{}, error) {
@@ -190,7 +199,7 @@ func (s *Server) ethGetBlockByNumber(params []interface{}) (interface{}, error) 
 			blockNum = block.Header.Number
 		}
 	} else {
-		blockNum, err = hexutil.DecodeUint64(blockNumStr)
+		blockNum, err = strconv.ParseUint(strings.TrimPrefix(blockNumStr, "0x"), 16, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid block number: %v", err)
 		}
@@ -210,7 +219,15 @@ func (s *Server) ethGetBlockByHash(params []interface{}) (interface{}, error) {
 		return nil, fmt.Errorf("missing block hash parameter")
 	}
 
-	hash := common.HexToHash(params[0].(string))
+	hashStr := params[0].(string)
+	hashBytes, err := hex.DecodeString(strings.TrimPrefix(hashStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid hash format")
+	}
+	
+	var hash [32]byte
+	copy(hash[:], hashBytes)
+	
 	block := s.blockchain.GetBlockByHash(hash)
 	if block == nil {
 		return nil, nil
@@ -225,11 +242,18 @@ func (s *Server) ethGetTransactionByHash(params []interface{}) (interface{}, err
 		return nil, fmt.Errorf("missing transaction hash parameter")
 	}
 
-	hash := common.HexToHash(params[0].(string))
+	hashStr := params[0].(string)
+	hashBytes, err := hex.DecodeString(strings.TrimPrefix(hashStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid hash format")
+	}
+
+	var hash [32]byte
+	copy(hash[:], hashBytes)
 	
 	// Check mempool first
 	if tx := s.blockchain.GetMempool().GetTransaction(hash); tx != nil {
-		return s.formatTransaction(tx, nil, 0, 0), nil
+		return s.formatTransaction(tx, &blockHash{}, 0, 0), nil
 	}
 
 	// Search in blocks (this could be optimized with an index)
@@ -259,7 +283,14 @@ func (s *Server) ethGetTransactionReceipt(params []interface{}) (interface{}, er
 		return nil, fmt.Errorf("missing transaction hash parameter")
 	}
 
-	hash := common.HexToHash(params[0].(string))
+	hashStr := params[0].(string)
+	hashBytes, err := hex.DecodeString(strings.TrimPrefix(hashStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid hash format")
+	}
+
+	var hash [32]byte
+	copy(hash[:], hashBytes)
 
 	// Search for transaction receipt in blocks
 	currentBlock := s.blockchain.GetCurrentBlock()
@@ -302,16 +333,16 @@ func (s *Server) ethCall(params []interface{}) (interface{}, error) {
 
 func (s *Server) ethEstimateGas(params []interface{}) (interface{}, error) {
 	// Estimate gas for transaction
-	return hexutil.EncodeUint64(21000), nil
+	return fmt.Sprintf("0x%x", uint64(21000)), nil
 }
 
 func (s *Server) ethGasPrice() (interface{}, error) {
 	// Return current gas price (20 Gwei)
-	return hexutil.EncodeUint64(20000000000), nil
+	return fmt.Sprintf("0x%x", uint64(20000000000)), nil
 }
 
 func (s *Server) ethChainId() (interface{}, error) {
-	return hexutil.EncodeUint64(s.blockchain.GetConfig().ChainID), nil
+	return fmt.Sprintf("0x%x", s.blockchain.GetConfig().ChainID), nil
 }
 
 func (s *Server) ethGetTransactionCount(params []interface{}) (interface{}, error) {
@@ -319,10 +350,16 @@ func (s *Server) ethGetTransactionCount(params []interface{}) (interface{}, erro
 		return nil, fmt.Errorf("missing address parameter")
 	}
 
-	address := common.HexToAddress(params[0].(string))
+	addressStr := params[0].(string)
+	addressBytes, err := hex.DecodeString(strings.TrimPrefix(addressStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid address format")
+	}
+
+	var address [20]byte
+	copy(address[:], addressBytes)
 	nonce := s.blockchain.GetStateDB().GetNonce(address)
-	
-	return hexutil.EncodeUint64(nonce), nil
+	return fmt.Sprintf("0x%x", nonce), nil
 }
 
 func (s *Server) ethGetCode(params []interface{}) (interface{}, error) {
@@ -330,10 +367,16 @@ func (s *Server) ethGetCode(params []interface{}) (interface{}, error) {
 		return nil, fmt.Errorf("missing address parameter")
 	}
 
-	address := common.HexToAddress(params[0].(string))
+	addressStr := params[0].(string)
+	addressBytes, err := hex.DecodeString(strings.TrimPrefix(addressStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid address format")
+	}
+
+	var address [20]byte
+	copy(address[:], addressBytes)
 	code := s.blockchain.GetStateDB().GetCode(address)
-	
-	return hexutil.Encode(code), nil
+	return fmt.Sprintf("0x%x", code), nil
 }
 
 func (s *Server) ethGetStorageAt(params []interface{}) (interface{}, error) {
@@ -341,11 +384,26 @@ func (s *Server) ethGetStorageAt(params []interface{}) (interface{}, error) {
 		return nil, fmt.Errorf("missing parameters")
 	}
 
-	address := common.HexToAddress(params[0].(string))
-	key := common.HexToHash(params[1].(string))
+	addressStr := params[0].(string)
+	addressBytes, err := hex.DecodeString(strings.TrimPrefix(addressStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid address format")
+	}
+
+	var address [20]byte
+	copy(address[:], addressBytes)
+
+	keyStr := params[1].(string)
+	keyBytes, err := hex.DecodeString(strings.TrimPrefix(keyStr, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid key format")
+	}
+
+	var key [32]byte
+	copy(key[:], keyBytes)
+
 	value := s.blockchain.GetStateDB().GetState(address, key)
-	
-	return value.Hex(), nil
+	return fmt.Sprintf("0x%x", value), nil
 }
 
 func (s *Server) ethGetLogs(params []interface{}) (interface{}, error) {
@@ -359,18 +417,18 @@ func (s *Server) netVersion() (interface{}, error) {
 
 func (s *Server) formatBlock(block *core.Block, fullTx bool) map[string]interface{} {
 	result := map[string]interface{}{
-		"number":           hexutil.EncodeUint64(block.Header.Number),
-		"hash":             block.Header.Hash.Hex(),
-		"parentHash":       block.Header.ParentHash.Hex(),
-		"timestamp":        hexutil.EncodeUint64(uint64(block.Header.Timestamp)),
-		"stateRoot":        block.Header.StateRoot.Hex(),
-		"transactionsRoot": block.Header.TxHash.Hex(),
-		"receiptsRoot":     block.Header.ReceiptHash.Hex(),
-		"gasLimit":         hexutil.EncodeUint64(block.Header.GasLimit),
-		"gasUsed":          hexutil.EncodeUint64(block.Header.GasUsed),
-		"difficulty":       hexutil.EncodeBig(block.Header.Difficulty),
-		"nonce":            hexutil.EncodeUint64(block.Header.Nonce),
-		"size":             hexutil.EncodeUint64(1000), // Placeholder
+		"number":           fmt.Sprintf("0x%x", block.Header.Number),
+		"hash":             fmt.Sprintf("0x%x", block.Header.Hash),
+		"parentHash":       fmt.Sprintf("0x%x", block.Header.ParentHash),
+		"timestamp":        fmt.Sprintf("0x%x", block.Header.Timestamp),
+		"stateRoot":        fmt.Sprintf("0x%x", block.Header.StateRoot),
+		"transactionsRoot": fmt.Sprintf("0x%x", block.Header.TxHash),
+		"receiptsRoot":     fmt.Sprintf("0x%x", block.Header.ReceiptHash),
+		"gasLimit":         fmt.Sprintf("0x%x", block.Header.GasLimit),
+		"gasUsed":          fmt.Sprintf("0x%x", block.Header.GasUsed),
+		"difficulty":       fmt.Sprintf("0x%x", block.Header.Difficulty),
+		"nonce":            fmt.Sprintf("0x%x", block.Header.Nonce),
+		"size":             fmt.Sprintf("0x%x", 1000), // Placeholder
 	}
 
 	if fullTx {
@@ -382,7 +440,7 @@ func (s *Server) formatBlock(block *core.Block, fullTx bool) map[string]interfac
 	} else {
 		var txHashes []string
 		for _, tx := range block.Transactions {
-			txHashes = append(txHashes, tx.Hash.Hex())
+			txHashes = append(txHashes, fmt.Sprintf("0x%x", tx.Hash))
 		}
 		result["transactions"] = txHashes
 	}
@@ -390,30 +448,30 @@ func (s *Server) formatBlock(block *core.Block, fullTx bool) map[string]interfac
 	return result
 }
 
-func (s *Server) formatTransaction(tx *core.Transaction, blockHash *common.Hash, blockNumber uint64, txIndex uint64) map[string]interface{} {
+func (s *Server) formatTransaction(tx *core.Transaction, blockHash *[32]byte, blockNumber uint64, txIndex uint64) map[string]interface{} {
 	result := map[string]interface{}{
-		"hash":             tx.Hash.Hex(),
-		"nonce":            hexutil.EncodeUint64(tx.Nonce),
-		"gasPrice":         hexutil.EncodeBig(tx.GasPrice),
-		"gas":              hexutil.EncodeUint64(tx.GasLimit),
-		"value":            hexutil.EncodeBig(tx.Value),
-		"input":            hexutil.Encode(tx.Data),
-		"from":             tx.From.Hex(),
-		"v":                hexutil.EncodeBig(tx.V),
-		"r":                hexutil.EncodeBig(tx.R),
-		"s":                hexutil.EncodeBig(tx.S),
+		"hash":             fmt.Sprintf("0x%x", tx.Hash),
+		"nonce":            fmt.Sprintf("0x%x", tx.Nonce),
+		"gasPrice":         fmt.Sprintf("0x%x", tx.GasPrice),
+		"gas":              fmt.Sprintf("0x%x", tx.GasLimit),
+		"value":            fmt.Sprintf("0x%x", tx.Value),
+		"input":            fmt.Sprintf("0x%x", tx.Data),
+		"from":             fmt.Sprintf("0x%x", tx.From),
+		"v":                fmt.Sprintf("0x%x", tx.V),
+		"r":                fmt.Sprintf("0x%x", tx.R),
+		"s":                fmt.Sprintf("0x%x", tx.S),
 	}
 
 	if tx.To != nil {
-		result["to"] = tx.To.Hex()
+		result["to"] = fmt.Sprintf("0x%x", *tx.To)
 	} else {
 		result["to"] = nil
 	}
 
 	if blockHash != nil {
-		result["blockHash"] = blockHash.Hex()
-		result["blockNumber"] = hexutil.EncodeUint64(blockNumber)
-		result["transactionIndex"] = hexutil.EncodeUint64(txIndex)
+		result["blockHash"] = fmt.Sprintf("0x%x", *blockHash)
+		result["blockNumber"] = fmt.Sprintf("0x%x", blockNumber)
+		result["transactionIndex"] = fmt.Sprintf("0x%x", txIndex)
 	} else {
 		result["blockHash"] = nil
 		result["blockNumber"] = nil
@@ -425,30 +483,32 @@ func (s *Server) formatTransaction(tx *core.Transaction, blockHash *common.Hash,
 
 func (s *Server) formatReceipt(receipt *core.TransactionReceipt) map[string]interface{} {
 	return map[string]interface{}{
-		"transactionHash":   receipt.TxHash.Hex(),
-		"transactionIndex":  hexutil.EncodeUint64(receipt.TxIndex),
-		"blockHash":         receipt.BlockHash.Hex(),
-		"blockNumber":       hexutil.EncodeUint64(receipt.BlockNumber),
-		"from":              receipt.From.Hex(),
+		"transactionHash":   fmt.Sprintf("0x%x", receipt.TxHash),
+		"transactionIndex":  fmt.Sprintf("0x%x", receipt.TxIndex),
+		"blockHash":         fmt.Sprintf("0x%x", receipt.BlockHash),
+		"blockNumber":       fmt.Sprintf("0x%x", receipt.BlockNumber),
+		"from":              fmt.Sprintf("0x%x", receipt.From),
 		"to":                func() interface{} {
 			if receipt.To != nil {
-				return receipt.To.Hex()
+				return fmt.Sprintf("0x%x", *receipt.To)
 			}
 			return nil
 		}(),
-		"gasUsed":           hexutil.EncodeUint64(receipt.GasUsed),
-		"cumulativeGasUsed": hexutil.EncodeUint64(receipt.CumulativeGasUsed),
+		"gasUsed":           fmt.Sprintf("0x%x", receipt.GasUsed),
+		"cumulativeGasUsed": fmt.Sprintf("0x%x", receipt.CumulativeGasUsed),
 		"contractAddress":   func() interface{} {
 			if receipt.ContractAddress != nil {
-				return receipt.ContractAddress.Hex()
+				return fmt.Sprintf("0x%x", *receipt.ContractAddress)
 			}
 			return nil
 		}(),
 		"logs":              receipt.Logs,
-		"status":            hexutil.EncodeUint64(receipt.Status),
-		"logsBloom":         hexutil.Encode(receipt.LogsBloom),
+		"status":            fmt.Sprintf("0x%x", receipt.Status),
+		"logsBloom":         fmt.Sprintf("0x%x", receipt.LogsBloom),
 	}
 }
+
+type blockHash [32]byte
 
 func (s *Server) sendError(w http.ResponseWriter, id interface{}, code int, message string) {
 	response := JSONRPCResponse{

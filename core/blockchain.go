@@ -1,23 +1,20 @@
+
 package core
 
 import (
 	"blockchain-node/cache"
+	"blockchain-node/consensus"
 	"blockchain-node/crypto"
 	"blockchain-node/database"
-	"blockchain-node/evm"
+	"blockchain-node/execution"
 	"blockchain-node/logger"
 	"blockchain-node/metrics"
+	"blockchain-node/state"
 	"blockchain-node/validation"
 	"errors"
 	"fmt"
 	"math/big"
 	"sync"
-
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/state"
-	ethTypes "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 type Config struct {
@@ -30,12 +27,12 @@ type Blockchain struct {
 	config      *Config
 	db          database.Database
 	stateDB     *state.StateDB
-	trieDB      *trie.Database
 	currentBlock *Block
-	blocks      map[common.Hash]*Block
+	blocks      map[[32]byte]*Block
 	blockByNumber map[uint64]*Block
 	mempool     *Mempool
-	evm         *evm.EVM
+	vm          *execution.VirtualMachine
+	consensus   consensus.Engine
 	validator   *validation.Validator
 	cache       *cache.Cache
 	mu          sync.RWMutex
@@ -43,7 +40,7 @@ type Blockchain struct {
 }
 
 func NewBlockchain(config *Config) (*Blockchain, error) {
-	logger.Infof("Initializing blockchain with ChainID: %d", config.ChainID)
+	logger.Infof("Initializing custom blockchain with ChainID: %d", config.ChainID)
 	
 	// Initialize database
 	db, err := database.NewLevelDB(config.DataDir + "/chaindata")
@@ -52,11 +49,8 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 		return nil, fmt.Errorf("failed to open database: %v", err)
 	}
 
-	// Initialize trie database
-	trieDB := trie.NewDatabase(db.GetEthDB())
-
-	// Initialize state database
-	stateDB, err := state.New(common.Hash{}, state.NewDatabase(trieDB), nil)
+	// Initialize state database with empty root
+	stateDB, err := state.NewStateDB([32]byte{}, db)
 	if err != nil {
 		logger.Errorf("Failed to create state database: %v", err)
 		return nil, fmt.Errorf("failed to create state database: %v", err)
@@ -66,8 +60,7 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 		config:        config,
 		db:            db,
 		stateDB:       stateDB,
-		trieDB:        trieDB,
-		blocks:        make(map[common.Hash]*Block),
+		blocks:        make(map[[32]byte]*Block),
 		blockByNumber: make(map[uint64]*Block),
 		mempool:       NewMempool(),
 		validator:     validation.NewValidator(),
@@ -75,8 +68,9 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 		shutdownCh:    make(chan struct{}),
 	}
 
-	// Initialize EVM
-	bc.evm = evm.NewEVM(bc)
+	// Initialize custom VM and consensus
+	bc.vm = execution.NewVirtualMachine(bc.stateDB)
+	bc.consensus = consensus.NewProofOfWork()
 
 	// Load or create genesis block
 	if err := bc.initGenesis(); err != nil {
@@ -84,7 +78,7 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 		return nil, fmt.Errorf("failed to initialize genesis: %v", err)
 	}
 
-	logger.Info("Blockchain initialized successfully")
+	logger.Info("Custom blockchain initialized successfully")
 	return bc, nil
 }
 
@@ -94,7 +88,7 @@ func (bc *Blockchain) initGenesis() error {
 	// Check if genesis block already exists
 	if block := bc.GetBlockByNumber(0); block != nil {
 		bc.currentBlock = block
-		logger.Infof("Genesis block already exists: %s", block.Header.Hash.Hex())
+		logger.Infof("Genesis block already exists: %x", block.Header.Hash)
 		return nil
 	}
 
@@ -102,11 +96,11 @@ func (bc *Blockchain) initGenesis() error {
 	genesis := &Block{
 		Header: &BlockHeader{
 			Number:       0,
-			ParentHash:   common.Hash{},
+			ParentHash:   [32]byte{},
 			Timestamp:    1640995200, // Jan 1, 2022
-			StateRoot:    bc.stateDB.IntermediateRoot(false),
-			TxHash:       ethTypes.EmptyRootHash,
-			ReceiptHash:  ethTypes.EmptyRootHash,
+			StateRoot:    [32]byte{},
+			TxHash:       [32]byte{},
+			ReceiptHash:  [32]byte{},
 			GasLimit:     bc.config.BlockGasLimit,
 			GasUsed:      0,
 			Difficulty:   big.NewInt(1000),
@@ -116,16 +110,23 @@ func (bc *Blockchain) initGenesis() error {
 	}
 
 	// Set up genesis state (allocate some initial balances)
-	genesisAllocation := map[common.Address]*big.Int{
-		common.HexToAddress("0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C"): big.NewInt(1e18), // 1 ETH
+	genesisAllocation := map[[20]byte]*big.Int{
+		[20]byte{0x74, 0x2d, 0x35, 0xcc, 0x66, 0x35, 0xc0, 0x53, 0x29, 0x25, 0xa3, 0xb8, 0xd5, 0xc6, 0xc1, 0xc8, 0xb1, 0xc5, 0xc6, 0xc}: big.NewInt(1e18), // 1 ETH
 	}
 
 	for addr, balance := range genesisAllocation {
 		bc.stateDB.SetBalance(addr, balance)
-		logger.Debugf("Genesis allocation: %s -> %s", addr.Hex(), balance.String())
+		logger.Debugf("Genesis allocation: %x -> %s", addr, balance.String())
 	}
 
-	genesis.Header.StateRoot = bc.stateDB.IntermediateRoot(false)
+	// Commit state and get state root
+	stateRoot, err := bc.stateDB.Commit()
+	if err != nil {
+		logger.Errorf("Failed to commit genesis state: %v", err)
+		return fmt.Errorf("failed to commit genesis state: %v", err)
+	}
+
+	genesis.Header.StateRoot = stateRoot
 	genesis.Header.Hash = genesis.CalculateHash()
 
 	// Save genesis block
@@ -133,22 +134,10 @@ func (bc *Blockchain) initGenesis() error {
 	bc.blockByNumber[0] = genesis
 	bc.currentBlock = genesis
 
-	// Commit state
-	root, err := bc.stateDB.Commit(false)
-	if err != nil {
-		logger.Errorf("Failed to commit genesis state: %v", err)
-		return fmt.Errorf("failed to commit genesis state: %v", err)
-	}
-
-	if err := bc.trieDB.Commit(root, false, nil); err != nil {
-		logger.Errorf("Failed to commit genesis trie: %v", err)
-		return fmt.Errorf("failed to commit genesis trie: %v", err)
-	}
-
 	// Update metrics
 	metrics.GetMetrics().IncrementBlockCount()
 	
-	logger.BlockEvent(0, genesis.Header.Hash.Hex(), 0, "genesis")
+	logger.BlockEvent(0, fmt.Sprintf("%x", genesis.Header.Hash), 0, "genesis")
 	
 	if err := bc.saveBlock(genesis); err != nil {
 		logger.Errorf("Failed to save genesis block: %v", err)
@@ -173,7 +162,7 @@ func (bc *Blockchain) GetCurrentBlock() *Block {
 	return bc.currentBlock
 }
 
-func (bc *Blockchain) GetBlockByHash(hash common.Hash) *Block {
+func (bc *Blockchain) GetBlockByHash(hash [32]byte) *Block {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 	return bc.blocks[hash]
@@ -191,14 +180,21 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 
 	logger.Debugf("Adding block %d to blockchain", block.Header.Number)
 
-	// Validate block
+	// Validate block using custom validator
 	if err := bc.validator.ValidateBlock(block); err != nil {
 		logger.Errorf("Block validation failed: %v", err)
 		metrics.GetMetrics().IncrementErrorCount()
 		return err
 	}
 
-	// Execute transactions
+	// Validate proof of work
+	if !bc.consensus.ValidateProofOfWork(block) {
+		logger.Errorf("Invalid proof of work for block %d", block.Header.Number)
+		metrics.GetMetrics().IncrementErrorCount()
+		return errors.New("invalid proof of work")
+	}
+
+	// Execute transactions using custom VM
 	if err := bc.executeBlock(block); err != nil {
 		logger.Errorf("Block execution failed: %v", err)
 		metrics.GetMetrics().IncrementErrorCount()
@@ -215,7 +211,7 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	metrics.GetMetrics().SetTransactionPoolSize(uint32(bc.mempool.GetPendingCount()))
 
 	// Log block event
-	logger.LogBlockEvent(block.Header.Number, block.Header.Hash.Hex(), len(block.Transactions), "miner")
+	logger.LogBlockEvent(block.Header.Number, fmt.Sprintf("%x", block.Header.Hash), len(block.Transactions), "miner")
 
 	// Save to database
 	if err := bc.saveBlock(block); err != nil {
@@ -227,60 +223,89 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	return nil
 }
 
-func (bc *Blockchain) validateBlock(block *Block) error {
-	if block.Header.Number != bc.currentBlock.Header.Number+1 {
-		return errors.New("invalid block number")
-	}
-
-	if block.Header.ParentHash != bc.currentBlock.Header.Hash {
-		return errors.New("invalid parent hash")
-	}
-
-	// Validate proof of work
-	if !crypto.ValidateProofOfWork(block.Header.Hash, block.Header.Nonce, block.Header.Difficulty) {
-		return errors.New("invalid proof of work")
-	}
-
-	return nil
-}
-
 func (bc *Blockchain) executeBlock(block *Block) error {
 	logger.Debugf("Executing block %d with %d transactions", block.Header.Number, len(block.Transactions))
 	
 	// Create new state database for this block
-	stateDB, err := state.New(bc.currentBlock.Header.StateRoot, state.NewDatabase(bc.trieDB), nil)
+	stateDB, err := state.NewStateDB(bc.currentBlock.Header.StateRoot, bc.db)
 	if err != nil {
 		return fmt.Errorf("failed to create state database: %v", err)
 	}
+
+	// Create new VM for this block
+	vm := execution.NewVirtualMachine(stateDB)
 
 	var receipts []*TransactionReceipt
 	var logs []*Log
 	gasUsed := uint64(0)
 
-	// Execute each transaction
+	// Execute each transaction using custom VM
 	for i, tx := range block.Transactions {
-		logger.Debugf("Executing transaction %d: %s", i, tx.Hash.Hex())
+		logger.Debugf("Executing transaction %d: %x", i, tx.Hash)
 		
-		receipt, err := bc.evm.ExecuteTransaction(stateDB, tx, block.Header, gasUsed)
+		// Create execution context
+		ctx := &execution.ExecutionContext{
+			Transaction: tx,
+			BlockHeader: block.Header,
+			From:        tx.From,
+			To:          tx.To,
+			Value:       tx.Value,
+			Data:        tx.Data,
+		}
+
+		// Execute transaction
+		result, err := vm.ExecuteTransaction(ctx)
 		if err != nil {
 			logger.Errorf("Failed to execute transaction %d: %v", i, err)
 			return fmt.Errorf("failed to execute transaction %d: %v", i, err)
 		}
 
+		// Create receipt
+		receipt := &TransactionReceipt{
+			TxHash:          tx.Hash,
+			TxIndex:         uint64(i),
+			BlockHash:       block.Header.Hash,
+			BlockNumber:     block.Header.Number,
+			From:            tx.From,
+			To:              tx.To,
+			GasUsed:         result.GasUsed,
+			CumulativeGasUsed: gasUsed + result.GasUsed,
+			Status:          1, // Success
+			Logs:            make([]*Log, len(result.Logs)),
+		}
+
+		if result.ContractAddress != nil {
+			receipt.ContractAddress = result.ContractAddress
+		}
+
+		// Convert execution logs to receipt logs
+		for j, execLog := range result.Logs {
+			receipt.Logs[j] = &Log{
+				Address:     execLog.Address,
+				Topics:      execLog.Topics,
+				Data:        execLog.Data,
+				BlockNumber: block.Header.Number,
+				TxHash:      tx.Hash,
+				TxIndex:     uint64(i),
+				BlockHash:   block.Header.Hash,
+				Index:       uint64(j),
+			}
+		}
+
 		receipts = append(receipts, receipt)
 		logs = append(logs, receipt.Logs...)
-		gasUsed += receipt.GasUsed
+		gasUsed += result.GasUsed
 		
 		// Update transaction metrics
 		metrics.GetMetrics().IncrementTransactionCount()
 		
 		// Log transaction event
 		logger.LogTransactionEvent(
-			tx.Hash.Hex(),
-			tx.From.Hex(),
+			fmt.Sprintf("%x", tx.Hash),
+			fmt.Sprintf("%x", tx.From),
 			func() string {
 				if tx.To != nil {
-					return tx.To.Hex()
+					return fmt.Sprintf("%x", *tx.To)
 				}
 				return "contract_creation"
 			}(),
@@ -296,19 +321,16 @@ func (bc *Blockchain) executeBlock(block *Block) error {
 	// Update block with receipts
 	block.Receipts = receipts
 	block.Header.GasUsed = gasUsed
-	block.Header.StateRoot = stateDB.IntermediateRoot(false)
 
-	// Commit state
-	root, err := stateDB.Commit(false)
+	// Commit state changes
+	stateRoot, err := stateDB.Commit()
 	if err != nil {
 		return fmt.Errorf("failed to commit state: %v", err)
 	}
 
-	if err := bc.trieDB.Commit(root, false, nil); err != nil {
-		return fmt.Errorf("failed to commit trie: %v", err)
-	}
-
+	block.Header.StateRoot = stateRoot
 	bc.stateDB = stateDB
+	
 	logger.Debugf("Block %d executed successfully", block.Header.Number)
 	return nil
 }

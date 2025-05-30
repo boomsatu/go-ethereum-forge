@@ -3,12 +3,11 @@ package network
 
 import (
 	"blockchain-node/core"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type Config struct {
@@ -18,12 +17,14 @@ type Config struct {
 }
 
 type Server struct {
-	config     *Config
+	port       int
 	blockchain *core.Blockchain
 	peers      map[string]*Peer
 	listener   net.Listener
 	running    bool
 	mu         sync.RWMutex
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 type Peer struct {
@@ -38,16 +39,19 @@ type Message struct {
 	Data interface{} `json:"data"`
 }
 
-func NewServer(config *Config, blockchain *core.Blockchain) *Server {
+func NewServer(port int, blockchain *core.Blockchain) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		config:     config,
+		port:       port,
 		blockchain: blockchain,
 		peers:      make(map[string]*Peer),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
-func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.config.Port))
+func (s *Server) Start(ctx context.Context) error {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
 		return fmt.Errorf("failed to start server: %v", err)
 	}
@@ -57,20 +61,27 @@ func (s *Server) Start() error {
 
 	go s.acceptConnections()
 
-	fmt.Printf("P2P server started on port %d\n", s.config.Port)
-	return nil
+	fmt.Printf("P2P server started on port %d\n", s.port)
+	
+	// Wait for context cancellation
+	<-ctx.Done()
+	return s.Stop()
 }
 
-func (s *Server) Stop() {
+func (s *Server) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if !s.running {
-		return
+		return nil
 	}
 
 	s.running = false
-	s.listener.Close()
+	s.cancel()
+	
+	if s.listener != nil {
+		s.listener.Close()
+	}
 
 	// Close all peer connections
 	for _, peer := range s.peers {
@@ -78,6 +89,7 @@ func (s *Server) Stop() {
 	}
 
 	fmt.Println("P2P server stopped")
+	return nil
 }
 
 func (s *Server) acceptConnections() {
@@ -170,7 +182,7 @@ func (s *Server) handleGetBlocks(peer *Peer, msg *Message) {
 	inv := make([]string, 0)
 	for i := uint64(0); i <= currentBlock.Header.Number; i++ {
 		if block := s.blockchain.GetBlockByNumber(i); block != nil {
-			inv = append(inv, block.Header.Hash.Hex())
+			inv = append(inv, fmt.Sprintf("%x", block.Header.Hash))
 		}
 	}
 
@@ -191,7 +203,13 @@ func (s *Server) handleInv(peer *Peer, msg *Message) {
 	// Request data for items we don't have
 	needed := make([]string, 0)
 	for _, item := range items {
-		hash := common.HexToHash(item.(string))
+		hashStr := item.(string)
+		var hash [32]byte
+		// Convert hex string to hash
+		for i := 0; i < 32 && i*2 < len(hashStr); i++ {
+			fmt.Sscanf(hashStr[i*2:i*2+2], "%02x", &hash[i])
+		}
+		
 		if s.blockchain.GetBlockByHash(hash) == nil {
 			needed = append(needed, item.(string))
 		}
@@ -213,7 +231,13 @@ func (s *Server) handleGetData(peer *Peer, msg *Message) {
 	items, _ := getData["items"].([]interface{})
 
 	for _, item := range items {
-		hash := common.HexToHash(item.(string))
+		hashStr := item.(string)
+		var hash [32]byte
+		// Convert hex string to hash
+		for i := 0; i < 32 && i*2 < len(hashStr); i++ {
+			fmt.Sscanf(hashStr[i*2:i*2+2], "%02x", &hash[i])
+		}
+		
 		if block := s.blockchain.GetBlockByHash(hash); block != nil {
 			s.sendMessage(peer, &Message{
 				Type: "block",
@@ -256,7 +280,7 @@ func (s *Server) handleTransaction(peer *Peer, msg *Message) {
 		return
 	}
 
-	fmt.Printf("Added transaction %s from peer %s\n", tx.Hash.Hex(), peer.address)
+	fmt.Printf("Added transaction %x from peer %s\n", tx.Hash, peer.address)
 }
 
 func (s *Server) sendMessage(peer *Peer, msg *Message) {
@@ -298,4 +322,8 @@ func (s *Server) GetPeerCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.peers)
+}
+
+func (s *Server) GetConnectionCount() int {
+	return s.GetPeerCount()
 }

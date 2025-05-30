@@ -24,8 +24,8 @@ import (
 
 var startNodeCmd = &cobra.Command{
 	Use:   "startnode",
-	Short: "Start the blockchain node",
-	Long:  `Start the blockchain node with P2P networking, RPC server, and optional mining.`,
+	Short: "Start the custom blockchain node",
+	Long:  `Start the custom blockchain node with P2P networking, RPC server, and optional mining.`,
 	RunE:  runStartNode,
 }
 
@@ -48,13 +48,13 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 	// Set logging level based on config
 	logger.SetLevel(logger.LogLevel(cfg.GetLogLevel()))
 	
-	logger.Info("Starting blockchain node...")
+	logger.Info("Starting custom blockchain node...")
 	logger.Infof("Configuration loaded: DataDir=%s, Port=%d, RPCPort=%d", cfg.DataDir, cfg.Port, cfg.RPCPort)
 	
 	// Initialize security manager
 	securityManager := security.NewSecurityManager()
 	
-	// Initialize blockchain
+	// Initialize blockchain with custom configuration
 	blockchainConfig := &core.Config{
 		DataDir:       cfg.DataDir,
 		ChainID:       cfg.ChainID,
@@ -96,12 +96,16 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 	}()
 	
 	// Start RPC server
-	rpcServer := rpc.NewServer(blockchain, securityManager)
+	rpcConfig := &rpc.Config{
+		Host: cfg.RPCAddr,
+		Port: cfg.RPCPort,
+	}
+	rpcServer := rpc.NewServer(rpcConfig, blockchain)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		logger.Infof("Starting RPC server on %s:%d", cfg.RPCAddr, cfg.RPCPort)
-		if err := rpcServer.Start(fmt.Sprintf("%s:%d", cfg.RPCAddr, cfg.RPCPort)); err != nil {
+		if err := rpcServer.Start(); err != nil {
 			logger.Errorf("RPC server error: %v", err)
 		}
 	}()
@@ -184,7 +188,7 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 					memUsed, memSys := getMemoryUsage()
 					metrics.GetMetrics().SetMemoryUsage(memUsed)
 					
-					// Update peer count (placeholder)
+					// Update peer count
 					metrics.GetMetrics().SetPeerCount(uint32(p2pServer.GetPeerCount()))
 					
 					// Update connection count
@@ -194,7 +198,7 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 		}()
 	}
 	
-	logger.Info("Blockchain node started successfully")
+	logger.Info("Custom blockchain node started successfully")
 	logger.Info("Press Ctrl+C to stop the node")
 	
 	// Wait for interrupt signal
@@ -221,7 +225,7 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 		logger.Warning("Timeout waiting for services to stop")
 	}
 	
-	logger.Info("Blockchain node stopped")
+	logger.Info("Custom blockchain node stopped")
 	return nil
 }
 

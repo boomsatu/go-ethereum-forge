@@ -6,53 +6,50 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
-
-	"github.com/ethereum/go-ethereum/common"
-	ethTypes "github.com/ethereum/go-ethereum/core/types"
 )
 
 type Transaction struct {
 	Nonce    uint64      `json:"nonce"`
 	GasPrice *big.Int    `json:"gasPrice"`
 	GasLimit uint64      `json:"gasLimit"`
-	To       *common.Address `json:"to"`
+	To       *[20]byte   `json:"to"`
 	Value    *big.Int    `json:"value"`
 	Data     []byte      `json:"data"`
 	V        *big.Int    `json:"v"`
 	R        *big.Int    `json:"r"`
 	S        *big.Int    `json:"s"`
-	Hash     common.Hash `json:"hash"`
-	From     common.Address `json:"from"`
+	Hash     [32]byte    `json:"hash"`
+	From     [20]byte    `json:"from"`
 }
 
 type TransactionReceipt struct {
-	TxHash          common.Hash    `json:"transactionHash"`
+	TxHash          [32]byte       `json:"transactionHash"`
 	TxIndex         uint64         `json:"transactionIndex"`
-	BlockHash       common.Hash    `json:"blockHash"`
+	BlockHash       [32]byte       `json:"blockHash"`
 	BlockNumber     uint64         `json:"blockNumber"`
-	From            common.Address `json:"from"`
-	To              *common.Address `json:"to"`
+	From            [20]byte       `json:"from"`
+	To              *[20]byte      `json:"to"`
 	GasUsed         uint64         `json:"gasUsed"`
 	CumulativeGasUsed uint64       `json:"cumulativeGasUsed"`
-	ContractAddress *common.Address `json:"contractAddress"`
+	ContractAddress *[20]byte      `json:"contractAddress"`
 	Logs            []*Log         `json:"logs"`
 	Status          uint64         `json:"status"`
 	LogsBloom       []byte         `json:"logsBloom"`
 }
 
 type Log struct {
-	Address     common.Address `json:"address"`
-	Topics      []common.Hash  `json:"topics"`
-	Data        []byte         `json:"data"`
-	BlockNumber uint64         `json:"blockNumber"`
-	TxHash      common.Hash    `json:"transactionHash"`
-	TxIndex     uint64         `json:"transactionIndex"`
-	BlockHash   common.Hash    `json:"blockHash"`
-	Index       uint64         `json:"logIndex"`
-	Removed     bool           `json:"removed"`
+	Address     [20]byte   `json:"address"`
+	Topics      [][32]byte `json:"topics"`
+	Data        []byte     `json:"data"`
+	BlockNumber uint64     `json:"blockNumber"`
+	TxHash      [32]byte   `json:"transactionHash"`
+	TxIndex     uint64     `json:"transactionIndex"`
+	BlockHash   [32]byte   `json:"blockHash"`
+	Index       uint64     `json:"logIndex"`
+	Removed     bool       `json:"removed"`
 }
 
-func NewTransaction(nonce uint64, to *common.Address, value *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte) *Transaction {
+func NewTransaction(nonce uint64, to *[20]byte, value *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte) *Transaction {
 	tx := &Transaction{
 		Nonce:    nonce,
 		GasPrice: gasPrice,
@@ -66,7 +63,7 @@ func NewTransaction(nonce uint64, to *common.Address, value *big.Int, gasLimit u
 	return tx
 }
 
-func (tx *Transaction) CalculateHash() common.Hash {
+func (tx *Transaction) CalculateHash() [32]byte {
 	data, _ := json.Marshal(struct {
 		Nonce    uint64 `json:"nonce"`
 		GasPrice string `json:"gasPrice"`
@@ -78,9 +75,9 @@ func (tx *Transaction) CalculateHash() common.Hash {
 		Nonce:    tx.Nonce,
 		GasPrice: tx.GasPrice.String(),
 		GasLimit: tx.GasLimit,
-		To:       func() string {
+		To: func() string {
 			if tx.To != nil {
-				return tx.To.Hex()
+				return hex.EncodeToString(tx.To[:])
 			}
 			return ""
 		}(),
@@ -105,12 +102,12 @@ func (tx *Transaction) Sign(privateKey []byte) error {
 	tx.S = new(big.Int).SetBytes(signature[32:64])
 	
 	// Recover sender address
-	pubKey, err := crypto.Ecrecover(hash[:], signature)
+	recoveredAddr, err := crypto.RecoverAddress(hash[:], signature)
 	if err != nil {
 		return err
 	}
 	
-	tx.From = crypto.PubkeyToAddress(pubKey)
+	copy(tx.From[:], recoveredAddr[:])
 	return nil
 }
 
@@ -123,32 +120,12 @@ func (tx *Transaction) VerifySignature() bool {
 	copy(signature[32:64], tx.S.Bytes())
 	signature[64] = byte(tx.V.Int64() - 27)
 	
-	pubKey, err := crypto.Ecrecover(hash[:], signature)
+	recoveredAddr, err := crypto.RecoverAddress(hash[:], signature)
 	if err != nil {
 		return false
 	}
 	
-	recoveredAddr := crypto.PubkeyToAddress(pubKey)
 	return recoveredAddr == tx.From
-}
-
-func (tx *Transaction) ToEthTransaction() *ethTypes.Transaction {
-	var to *common.Address
-	if tx.To != nil {
-		to = tx.To
-	}
-	
-	return ethTypes.NewTx(&ethTypes.LegacyTx{
-		Nonce:    tx.Nonce,
-		GasPrice: tx.GasPrice,
-		Gas:      tx.GasLimit,
-		To:       to,
-		Value:    tx.Value,
-		Data:     tx.Data,
-		V:        tx.V,
-		R:        tx.R,
-		S:        tx.S,
-	})
 }
 
 func (tx *Transaction) IsContractCreation() bool {
