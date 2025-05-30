@@ -1,9 +1,10 @@
-
 package rpc
 
 import (
+	"blockchain-node/consensus"
 	"blockchain-node/core"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"sync"
@@ -188,9 +189,12 @@ func (api *MiningAPI) MineBlockHandler(w http.ResponseWriter, r *http.Request) {
 
 	block := core.NewBlock(parentHash, blockNumber, transactions)
 
-	// Mine the block
-	difficulty := big.NewInt(1000)
-	block.MineBlock(difficulty)
+	// Mine the block using consensus
+	consensusEngine := consensus.NewProofOfWork()
+	if err := consensusEngine.MineBlock(block); err != nil {
+		http.Error(w, "Failed to mine block: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// Add block to blockchain
 	if err := api.blockchain.AddBlock(block); err != nil {

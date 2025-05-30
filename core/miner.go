@@ -2,12 +2,11 @@
 package core
 
 import (
+	"blockchain-node/consensus"
 	"fmt"
 	"math/big"
 	"sync"
 	"time"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type Miner struct {
@@ -16,6 +15,7 @@ type Miner struct {
 	running    bool
 	mu         sync.Mutex
 	stopChan   chan struct{}
+	consensus  *consensus.ProofOfWork
 }
 
 func NewMiner(blockchain *Blockchain, minerAddr string) *Miner {
@@ -23,6 +23,7 @@ func NewMiner(blockchain *Blockchain, minerAddr string) *Miner {
 		blockchain: blockchain,
 		minerAddr:  minerAddr,
 		stopChan:   make(chan struct{}),
+		consensus:  consensus.NewProofOfWork(),
 	}
 }
 
@@ -86,10 +87,12 @@ func (m *Miner) mineBlock() {
 	)
 
 	// Set miner reward transaction
-	minerAddr := common.HexToAddress(m.minerAddr)
+	minerAddrBytes := [20]byte{}
+	copy(minerAddrBytes[:], []byte(m.minerAddr)[:20])
+	
 	rewardTx := NewTransaction(
 		0, // nonce
-		&minerAddr,
+		&minerAddrBytes,
 		big.NewInt(2e18), // 2 ETH reward
 		21000, // gas limit
 		big.NewInt(0), // gas price
@@ -98,14 +101,17 @@ func (m *Miner) mineBlock() {
 	
 	newBlock.Transactions = append([]*Transaction{rewardTx}, newBlock.Transactions...)
 
-	// Mine the block
+	// Mine the block using consensus engine
 	fmt.Printf("Mining block %d with %d transactions...\n", newBlock.Header.Number, len(newBlock.Transactions))
 	start := time.Now()
 	
-	newBlock.MineBlock(newBlock.Header.Difficulty)
+	if err := m.consensus.MineBlock(newBlock); err != nil {
+		fmt.Printf("Failed to mine block: %v\n", err)
+		return
+	}
 	
 	duration := time.Since(start)
-	fmt.Printf("Block %d mined in %v! Hash: %s\n", newBlock.Header.Number, duration, newBlock.Header.Hash.Hex())
+	fmt.Printf("Block %d mined in %v! Hash: %x\n", newBlock.Header.Number, duration, newBlock.Header.Hash)
 
 	// Add block to blockchain
 	if err := m.blockchain.AddBlock(newBlock); err != nil {

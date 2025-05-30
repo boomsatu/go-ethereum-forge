@@ -1,12 +1,11 @@
-
 package core
 
 import (
 	"blockchain-node/cache"
-	"blockchain-node/consensus"
 	"blockchain-node/crypto"
 	"blockchain-node/database"
 	"blockchain-node/execution"
+	"blockchain-node/interfaces"
 	"blockchain-node/logger"
 	"blockchain-node/metrics"
 	"blockchain-node/state"
@@ -32,7 +31,7 @@ type Blockchain struct {
 	blockByNumber map[uint64]*Block
 	mempool     *Mempool
 	vm          *execution.VirtualMachine
-	consensus   consensus.Engine
+	consensus   interfaces.Engine
 	validator   *validation.Validator
 	cache       *cache.Cache
 	mu          sync.RWMutex
@@ -68,9 +67,8 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 		shutdownCh:    make(chan struct{}),
 	}
 
-	// Initialize custom VM and consensus
+	// Initialize custom VM
 	bc.vm = execution.NewVirtualMachine(bc.stateDB)
-	bc.consensus = consensus.NewProofOfWork()
 
 	// Load or create genesis block
 	if err := bc.initGenesis(); err != nil {
@@ -80,6 +78,11 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 
 	logger.Info("Custom blockchain initialized successfully")
 	return bc, nil
+}
+
+// SetConsensus sets the consensus engine for the blockchain
+func (bc *Blockchain) SetConsensus(consensus interfaces.Engine) {
+	bc.consensus = consensus
 }
 
 func (bc *Blockchain) initGenesis() error {
@@ -187,8 +190,8 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 		return err
 	}
 
-	// Validate proof of work
-	if !bc.consensus.ValidateProofOfWork(block) {
+	// Validate proof of work if consensus engine is available
+	if bc.consensus != nil && !bc.consensus.ValidateProofOfWork(block) {
 		logger.Errorf("Invalid proof of work for block %d", block.Header.Number)
 		metrics.GetMetrics().IncrementErrorCount()
 		return errors.New("invalid proof of work")
@@ -392,19 +395,19 @@ func (bc *Blockchain) Close() error {
 	return nil
 }
 
-func (bc *Blockchain) GetBalance(address common.Address) *big.Int {
+func (bc *Blockchain) GetBalance(address [20]byte) *big.Int {
 	return bc.stateDB.GetBalance(address)
 }
 
-func (bc *Blockchain) GetNonce(address common.Address) uint64 {
+func (bc *Blockchain) GetNonce(address [20]byte) uint64 {
 	return bc.stateDB.GetNonce(address)
 }
 
-func (bc *Blockchain) GetCode(address common.Address) []byte {
+func (bc *Blockchain) GetCode(address [20]byte) []byte {
 	return bc.stateDB.GetCode(address)
 }
 
-func (bc *Blockchain) GetStorageAt(address common.Address, key common.Hash) common.Hash {
+func (bc *Blockchain) GetStorageAt(address [20]byte, key [32]byte) [32]byte {
 	return bc.stateDB.GetState(address, key)
 }
 

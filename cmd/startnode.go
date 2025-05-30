@@ -1,8 +1,8 @@
-
 package cmd
 
 import (
 	"blockchain-node/config"
+	"blockchain-node/consensus"
 	"blockchain-node/core"
 	"blockchain-node/health"
 	"blockchain-node/logger"
@@ -71,6 +71,10 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 			logger.Errorf("Failed to close blockchain: %v", err)
 		}
 	}()
+	
+	// Initialize and set consensus engine
+	consensusEngine := consensus.NewProofOfWork()
+	blockchain.SetConsensus(consensusEngine)
 	
 	// Initialize health checker
 	var healthChecker *health.HealthChecker

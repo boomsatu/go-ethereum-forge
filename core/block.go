@@ -3,6 +3,7 @@ package core
 
 import (
 	"blockchain-node/crypto"
+	"blockchain-node/interfaces"
 	"encoding/json"
 	"math/big"
 	"time"
@@ -23,10 +24,31 @@ type BlockHeader struct {
 	Hash         [32]byte    `json:"hash"`
 }
 
+// Implement interfaces.BlockHeader
+func (bh *BlockHeader) GetNumber() uint64 { return bh.Number }
+func (bh *BlockHeader) GetParentHash() [32]byte { return bh.ParentHash }
+func (bh *BlockHeader) GetTimestamp() int64 { return bh.Timestamp }
+func (bh *BlockHeader) GetDifficulty() *big.Int { return bh.Difficulty }
+func (bh *BlockHeader) SetDifficulty(d *big.Int) { bh.Difficulty = d }
+func (bh *BlockHeader) GetHash() [32]byte { return bh.Hash }
+func (bh *BlockHeader) SetHash(h [32]byte) { bh.Hash = h }
+func (bh *BlockHeader) GetNonce() uint64 { return bh.Nonce }
+func (bh *BlockHeader) SetNonce(n uint64) { bh.Nonce = n }
+
 type Block struct {
 	Header       *BlockHeader           `json:"header"`
 	Transactions []*Transaction         `json:"transactions"`
 	Receipts     []*TransactionReceipt  `json:"receipts"`
+}
+
+// Implement interfaces.Block
+func (b *Block) GetHeader() interfaces.BlockHeader { return b.Header }
+func (b *Block) GetTransactions() []interface{} {
+	txs := make([]interface{}, len(b.Transactions))
+	for i, tx := range b.Transactions {
+		txs[i] = tx
+	}
+	return txs
 }
 
 func NewBlock(parentHash [32]byte, number uint64, transactions []*Transaction) *Block {

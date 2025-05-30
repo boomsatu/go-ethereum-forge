@@ -2,10 +2,12 @@
 package consensus
 
 import (
-	"blockchain-node/core"
 	"blockchain-node/crypto"
+	"blockchain-node/interfaces"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"math/big"
 	"time"
 )
@@ -26,43 +28,38 @@ type ProofOfWork struct {
 // NewProofOfWork creates a new PoW consensus engine
 func NewProofOfWork() *ProofOfWork {
 	return &ProofOfWork{
-		minDifficulty: big.NewInt(1000),      // Minimum difficulty
-		maxDifficulty: new(big.Int).Lsh(big.NewInt(1), 240), // Maximum difficulty
+		minDifficulty: big.NewInt(1000),                          // Minimum difficulty
+		maxDifficulty: new(big.Int).Lsh(big.NewInt(1), 240),     // Maximum difficulty
 	}
 }
 
 // MineBlock performs proof of work mining on a block
-func (pow *ProofOfWork) MineBlock(block *core.Block) error {
-	target := pow.calculateTarget(block.Header.Difficulty)
+func (pow *ProofOfWork) MineBlock(block interfaces.Block) error {
+	header := block.GetHeader()
+	target := pow.calculateTarget(header.GetDifficulty())
 	
 	// Initialize nonce with random value to prevent mining collisions
 	randomBytes := make([]byte, 8)
 	rand.Read(randomBytes)
-	block.Header.Nonce = binary.BigEndian.Uint64(randomBytes)
+	header.SetNonce(binary.BigEndian.Uint64(randomBytes))
 	
 	startTime := time.Now()
 	hashCount := uint64(0)
 	
 	for {
 		// Calculate block hash
-		hash := pow.calculateBlockHash(block)
+		hash := block.CalculateHash()
 		hashCount++
 		
 		// Check if hash meets difficulty target
 		hashInt := new(big.Int).SetBytes(hash[:])
 		if hashInt.Cmp(target) <= 0 {
-			block.Header.Hash = hash
-			
-			// Log mining success
-			elapsed := time.Since(startTime)
-			hashRate := float64(hashCount) / elapsed.Seconds()
-			
-			// Mining successful
+			header.SetHash(hash)
 			return nil
 		}
 		
 		// Increment nonce and continue
-		block.Header.Nonce++
+		header.SetNonce(header.GetNonce() + 1)
 		
 		// Prevent infinite loop - check every 100k iterations
 		if hashCount%100000 == 0 {
@@ -75,41 +72,40 @@ func (pow *ProofOfWork) MineBlock(block *core.Block) error {
 }
 
 // ValidateProofOfWork validates the proof of work for a block
-func (pow *ProofOfWork) ValidateProofOfWork(block *core.Block) bool {
+func (pow *ProofOfWork) ValidateProofOfWork(block interfaces.Block) bool {
+	header := block.GetHeader()
+	
 	// Recalculate block hash
-	hash := pow.calculateBlockHash(block)
+	hash := block.CalculateHash()
 	
 	// Verify hash matches block header
-	if hash != block.Header.Hash {
+	if hash != header.GetHash() {
 		return false
 	}
 	
 	// Check if hash meets difficulty target
-	target := pow.calculateTarget(block.Header.Difficulty)
+	target := pow.calculateTarget(header.GetDifficulty())
 	hashInt := new(big.Int).SetBytes(hash[:])
 	
 	return hashInt.Cmp(target) <= 0
 }
 
 // CalculateDifficulty calculates the difficulty for the next block
-func (pow *ProofOfWork) CalculateDifficulty(currentBlock *core.Block, parentBlock *core.Block) *big.Int {
+func (pow *ProofOfWork) CalculateDifficulty(currentBlock interfaces.Block, parentBlock interfaces.Block) *big.Int {
+	currentHeader := currentBlock.GetHeader()
+	parentHeader := parentBlock.GetHeader()
+	
 	// For genesis block or first few blocks, use minimum difficulty
-	if currentBlock.Header.Number < DifficultyWindow {
+	if currentHeader.GetNumber() < DifficultyWindow {
 		return new(big.Int).Set(pow.minDifficulty)
 	}
 	
-	// Get the block from DifficultyWindow blocks ago
-	targetNumber := currentBlock.Header.Number - DifficultyWindow
-	if targetNumber < 0 {
-		targetNumber = 0
-	}
-	
 	// Calculate actual time taken for last DifficultyWindow blocks
-	actualTime := time.Duration(currentBlock.Header.Timestamp-parentBlock.Header.Timestamp) * time.Second
+	actualTime := time.Duration(currentHeader.GetTimestamp()-parentHeader.GetTimestamp()) * time.Second
 	expectedTime := TargetBlockTime * DifficultyWindow
 	
 	// Calculate difficulty adjustment
-	currentDifficulty := new(big.Int).Set(parentBlock.Header.Difficulty)
+	currentDifficulty := new(big.Int).Set(parentHeader.GetDifficulty())
 	
 	// If blocks are coming too fast, increase difficulty
 	if actualTime < expectedTime/2 {
@@ -140,67 +136,8 @@ func (pow *ProofOfWork) calculateTarget(difficulty *big.Int) *big.Int {
 	return target
 }
 
-// calculateBlockHash calculates the hash of a block for mining
-func (pow *ProofOfWork) calculateBlockHash(block *core.Block) [32]byte {
-	// Create mining data by combining header fields
-	data := make([]byte, 0, 256)
-	
-	// Add block number
-	numberBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(numberBytes, block.Header.Number)
-	data = append(data, numberBytes...)
-	
-	// Add parent hash
-	data = append(data, block.Header.ParentHash[:]...)
-	
-	// Add timestamp
-	timestampBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(timestampBytes, uint64(block.Header.Timestamp))
-	data = append(data, timestampBytes...)
-	
-	// Add state root
-	data = append(data, block.Header.StateRoot[:]...)
-	
-	// Add transactions root
-	data = append(data, block.Header.TxHash[:]...)
-	
-	// Add receipts root
-	data = append(data, block.Header.ReceiptHash[:]...)
-	
-	// Add gas limit
-	gasLimitBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(gasLimitBytes, block.Header.GasLimit)
-	data = append(data, gasLimitBytes...)
-	
-	// Add gas used
-	gasUsedBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(gasUsedBytes, block.Header.GasUsed)
-	data = append(data, gasUsedBytes...)
-	
-	// Add difficulty
-	data = append(data, block.Header.Difficulty.Bytes()...)
-	
-	// Add nonce
-	nonceBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(nonceBytes, block.Header.Nonce)
-	data = append(data, nonceBytes...)
-	
-	// Calculate SHA256 hash
-	return crypto.SHA256Hash(data)
-}
-
-// Engine represents the consensus engine interface
-type Engine interface {
-	MineBlock(block *core.Block) error
-	ValidateProofOfWork(block *core.Block) bool
-	CalculateDifficulty(currentBlock *core.Block, parentBlock *core.Block) *big.Int
-}
-
 // Consensus errors
 var (
-	ErrMiningTimeout = fmt.Errorf("mining timeout exceeded")
-	ErrInvalidProof  = fmt.Errorf("invalid proof of work")
+	ErrMiningTimeout = errors.New("mining timeout exceeded")
+	ErrInvalidProof  = errors.New("invalid proof of work")
 )
-
-// Add missing import
-import "fmt"
