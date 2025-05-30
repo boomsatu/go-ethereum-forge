@@ -24,6 +24,10 @@ type Server struct {
 	blockchain *core.Blockchain
 	security   *security.SecurityManager
 	server     *http.Server
+	adminAPI   *AdminAPI
+	miningAPI  *MiningAPI
+	walletAPI  *WalletAPI
+	networkAPI *NetworkAPI
 }
 
 type JSONRPCRequest struct {
@@ -46,17 +50,55 @@ type JSONRPCError struct {
 }
 
 func NewServer(config *Config, blockchain *core.Blockchain) *Server {
-	return &Server{
+	server := &Server{
 		config:     config,
 		blockchain: blockchain,
 		security:   security.NewSecurityManager(),
+		adminAPI:   NewAdminAPI(blockchain),
+		miningAPI:  NewMiningAPI(blockchain),
+		walletAPI:  NewWalletAPI(blockchain),
+		networkAPI: NewNetworkAPI(blockchain),
 	}
+	return server
 }
 
 func (s *Server) Start() error {
 	router := mux.NewRouter()
+	
+	// JSON-RPC endpoint
 	router.HandleFunc("/", s.handleRPC).Methods("POST")
 	router.HandleFunc("/health", s.handleHealth).Methods("GET")
+
+	// REST API endpoints for React app
+	api := router.PathPrefix("/api").Subrouter()
+	
+	// Admin endpoints
+	admin := api.PathPrefix("/admin").Subrouter()
+	admin.HandleFunc("/start", s.adminAPI.StartHandler).Methods("POST", "OPTIONS")
+	admin.HandleFunc("/stop", s.adminAPI.StopHandler).Methods("POST", "OPTIONS")
+	admin.HandleFunc("/status", s.adminAPI.StatusHandler).Methods("GET", "OPTIONS")
+	admin.HandleFunc("/config", s.adminAPI.ConfigHandler).Methods("POST", "OPTIONS")
+
+	// Mining endpoints
+	mining := api.PathPrefix("/mining").Subrouter()
+	mining.HandleFunc("/start", s.miningAPI.StartHandler).Methods("POST", "OPTIONS")
+	mining.HandleFunc("/stop", s.miningAPI.StopHandler).Methods("POST", "OPTIONS")
+	mining.HandleFunc("/stats", s.miningAPI.StatsHandler).Methods("GET", "OPTIONS")
+	mining.HandleFunc("/mine-block", s.miningAPI.MineBlockHandler).Methods("POST", "OPTIONS")
+
+	// Wallet endpoints
+	walletRouter := api.PathPrefix("/wallet").Subrouter()
+	walletRouter.HandleFunc("/create", s.walletAPI.CreateHandler).Methods("POST", "OPTIONS")
+	walletRouter.HandleFunc("/import", s.walletAPI.ImportHandler).Methods("POST", "OPTIONS")
+	walletRouter.HandleFunc("/send", s.walletAPI.SendTransactionHandler).Methods("POST", "OPTIONS")
+
+	// Network endpoints
+	network := api.PathPrefix("/network").Subrouter()
+	network.HandleFunc("/stats", s.networkAPI.StatsHandler).Methods("GET", "OPTIONS")
+	network.HandleFunc("/peers", s.networkAPI.PeersHandler).Methods("GET", "OPTIONS")
+	
+	// Metrics endpoint
+	api.HandleFunc("/metrics", s.networkAPI.MetricsHandler).Methods("GET", "OPTIONS")
 
 	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 	s.server = &http.Server{
@@ -70,7 +112,7 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	fmt.Printf("JSON-RPC server started on %s\n", addr)
+	fmt.Printf("JSON-RPC server with REST API started on %s\n", addr)
 	return nil
 }
 
@@ -83,6 +125,7 @@ func (s *Server) Stop() {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 

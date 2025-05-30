@@ -2,14 +2,270 @@
 # Blockchain Node API Documentation
 
 ## Overview
-This blockchain node provides a complete Ethereum-compatible JSON-RPC API for interacting with the blockchain.
+This blockchain node provides a complete Ethereum-compatible JSON-RPC API and REST API for interacting with the blockchain.
 
-## Base URL
-```
-http://localhost:8545
+## Base URLs
+- JSON-RPC: `http://localhost:8545`
+- REST API: `http://localhost:8545/api`
+
+## REST API Endpoints
+
+### Node Administration
+
+#### POST /api/admin/start
+Start the blockchain node with configuration.
+
+**Request Body:**
+```json
+{
+  "dataDir": "./data",
+  "chainId": 1337,
+  "port": 30303,
+  "rpcPort": 8545,
+  "blockGasLimit": 8000000,
+  "mining": false,
+  "miner": ""
+}
 ```
 
-## Supported Methods
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Node started successfully",
+  "status": {
+    "running": true,
+    "startTime": "2024-01-01T00:00:00Z",
+    "config": {...}
+  }
+}
+```
+
+#### POST /api/admin/stop
+Stop the blockchain node.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Node stopped successfully"
+}
+```
+
+#### GET /api/admin/status
+Get current node status.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "config": {...},
+  "running": true,
+  "startTime": 1704067200,
+  "uptime": 3600
+}
+```
+
+#### POST /api/admin/config
+Update node configuration.
+
+**Request Body:**
+```json
+{
+  "dataDir": "./data",
+  "chainId": 1337,
+  "blockGasLimit": 8000000
+}
+```
+
+### Mining Control
+
+#### POST /api/mining/start
+Start mining process.
+
+**Request Body:**
+```json
+{
+  "minerAddress": "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C",
+  "threads": 1
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Mining started successfully",
+  "stats": {
+    "isActive": true,
+    "hashRate": 0,
+    "blocksFound": 0,
+    "difficulty": "1000",
+    "minerAddress": "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C",
+    "startTime": 1704067200
+  }
+}
+```
+
+#### POST /api/mining/stop
+Stop mining process.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Mining stopped successfully"
+}
+```
+
+#### GET /api/mining/stats
+Get current mining statistics.
+
+**Response:**
+```json
+{
+  "isActive": true,
+  "hashRate": 123.45,
+  "blocksFound": 5,
+  "difficulty": "1000",
+  "minerAddress": "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C",
+  "startTime": 1704067200
+}
+```
+
+#### POST /api/mining/mine-block
+Mine a single block manually.
+
+**Request Body:**
+```json
+{
+  "minerAddress": "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C"
+}
+```
+
+**Response:**
+```json
+{
+  "blockNumber": 123,
+  "hash": "0x1234567890abcdef...",
+  "success": true
+}
+```
+
+### Wallet Management
+
+#### POST /api/wallet/create
+Create a new wallet.
+
+**Response:**
+```json
+{
+  "address": "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C",
+  "privateKey": "0x1234567890abcdef...",
+  "balance": "0x0"
+}
+```
+
+#### POST /api/wallet/import
+Import wallet from private key.
+
+**Request Body:**
+```json
+{
+  "privateKey": "0x1234567890abcdef..."
+}
+```
+
+**Response:**
+```json
+{
+  "address": "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C",
+  "privateKey": "0x1234567890abcdef...",
+  "balance": "0x56bc75e2d630eb20"
+}
+```
+
+#### POST /api/wallet/send
+Send a transaction.
+
+**Request Body:**
+```json
+{
+  "from": "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C",
+  "to": "0x8ba1f109551bD432803012645Hac136c776dF7",
+  "value": "0x56bc75e2d630eb20",
+  "gasLimit": "0x5208",
+  "gasPrice": "0x4a817c800",
+  "privateKey": "0x1234567890abcdef...",
+  "data": "0x"
+}
+```
+
+**Response:**
+```json
+{
+  "hash": "0xabcdef1234567890...",
+  "success": true
+}
+```
+
+### Network Information
+
+#### GET /api/network/stats
+Get network statistics.
+
+**Response:**
+```json
+{
+  "peerCount": 5,
+  "blockHeight": 123,
+  "difficulty": "1000",
+  "hashRate": "0",
+  "chainId": 1337,
+  "syncStatus": {
+    "isSyncing": false,
+    "currentBlock": 123,
+    "highestBlock": 123
+  }
+}
+```
+
+#### GET /api/network/peers
+Get connected peers.
+
+**Response:**
+```json
+[
+  {
+    "id": "peer1",
+    "address": "192.168.1.100:30303",
+    "version": "1.0.0"
+  }
+]
+```
+
+### Metrics
+
+#### GET /api/metrics
+Get node metrics.
+
+**Response:**
+```json
+{
+  "uptime": 1704067200,
+  "memoryUsage": 52428800,
+  "diskUsage": 0,
+  "cpuUsage": 0,
+  "blockCount": 124,
+  "transactionCount": 456,
+  "peersConnected": 5,
+  "gasUsed": 0,
+  "gasLimit": 8000000,
+  "pendingTxs": 2
+}
+```
+
+## JSON-RPC Methods
 
 ### Block Information
 
@@ -170,3 +426,20 @@ Returns:
 ```json
 {"status": "ok"}
 ```
+
+## CORS Support
+
+All endpoints support CORS with the following headers:
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Allow-Methods: GET, POST, OPTIONS`
+- `Access-Control-Allow-Headers: Content-Type`
+
+## Rate Limiting
+
+The API implements rate limiting to prevent abuse. Default limits:
+- 100 requests per minute per IP
+- Burst capacity of 20 requests
+
+## Authentication
+
+Currently, the API does not require authentication. In production environments, consider implementing proper authentication and authorization mechanisms.
