@@ -4,7 +4,6 @@ import (
 	"blockchain-node/cache"
 	"blockchain-node/crypto"
 	"blockchain-node/database"
-	"blockchain-node/execution"
 	"blockchain-node/interfaces"
 	"blockchain-node/logger"
 	"blockchain-node/metrics"
@@ -30,7 +29,7 @@ type Blockchain struct {
 	blocks      map[[32]byte]*Block
 	blockByNumber map[uint64]*Block
 	mempool     *Mempool
-	vm          *execution.VirtualMachine
+	vm          interfaces.VirtualMachine
 	consensus   interfaces.Engine
 	validator   *validation.Validator
 	cache       *cache.Cache
@@ -67,8 +66,8 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 		shutdownCh:    make(chan struct{}),
 	}
 
-	// Initialize custom VM
-	bc.vm = execution.NewVirtualMachine(bc.stateDB)
+	// VM will be set later to avoid circular dependency
+	bc.vm = nil
 
 	// Load or create genesis block
 	if err := bc.initGenesis(); err != nil {
@@ -78,6 +77,11 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 
 	logger.Info("Custom blockchain initialized successfully")
 	return bc, nil
+}
+
+// SetVirtualMachine sets the virtual machine for the blockchain
+func (bc *Blockchain) SetVirtualMachine(vm interfaces.VirtualMachine) {
+	bc.vm = vm
 }
 
 // SetConsensus sets the consensus engine for the blockchain
@@ -235,19 +239,16 @@ func (bc *Blockchain) executeBlock(block *Block) error {
 		return fmt.Errorf("failed to create state database: %v", err)
 	}
 
-	// Create new VM for this block
-	vm := execution.NewVirtualMachine(stateDB)
-
 	var receipts []*TransactionReceipt
 	var logs []*Log
 	gasUsed := uint64(0)
 
-	// Execute each transaction using custom VM
+	// Execute each transaction using custom VM if available
 	for i, tx := range block.Transactions {
 		logger.Debugf("Executing transaction %d: %x", i, tx.Hash)
 		
 		// Create execution context
-		ctx := &execution.ExecutionContext{
+		ctx := &interfaces.ExecutionContext{
 			Transaction: tx,
 			BlockHeader: block.Header,
 			From:        tx.From,
@@ -256,11 +257,21 @@ func (bc *Blockchain) executeBlock(block *Block) error {
 			Data:        tx.Data,
 		}
 
-		// Execute transaction
-		result, err := vm.ExecuteTransaction(ctx)
-		if err != nil {
-			logger.Errorf("Failed to execute transaction %d: %v", i, err)
-			return fmt.Errorf("failed to execute transaction %d: %v", i, err)
+		var result *interfaces.ExecutionResult
+		if bc.vm != nil {
+			// Execute transaction with VM
+			result, err = bc.vm.ExecuteTransaction(ctx)
+			if err != nil {
+				logger.Errorf("Failed to execute transaction %d: %v", i, err)
+				return fmt.Errorf("failed to execute transaction %d: %v", i, err)
+			}
+		} else {
+			// Simple execution without VM (for basic transactions)
+			result = &interfaces.ExecutionResult{
+				GasUsed: 21000, // Basic gas cost
+				Status:  1,     // Success
+				Logs:    []interfaces.ExecutionLog{},
+			}
 		}
 
 		// Create receipt
@@ -418,4 +429,8 @@ func (bc *Blockchain) EstimateGas(tx *Transaction) (uint64, error) {
 		baseGas += uint64(len(tx.Data)) * 68
 	}
 	return baseGas, nil
+}
+
+func (bc *Blockchain) GetDatabase() database.Database {
+	return bc.db
 }

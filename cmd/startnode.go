@@ -4,6 +4,7 @@ import (
 	"blockchain-node/config"
 	"blockchain-node/consensus"
 	"blockchain-node/core"
+	"blockchain-node/execution"
 	"blockchain-node/health"
 	"blockchain-node/logger"
 	"blockchain-node/metrics"
@@ -75,6 +76,10 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 	// Initialize and set consensus engine
 	consensusEngine := consensus.NewProofOfWork()
 	blockchain.SetConsensus(consensusEngine)
+	
+	// Initialize and set virtual machine
+	vm := execution.NewVirtualMachine(blockchain.GetStateDB())
+	blockchain.SetVirtualMachine(vm)
 	
 	// Initialize health checker
 	var healthChecker *health.HealthChecker
