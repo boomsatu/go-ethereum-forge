@@ -1,24 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Wallet, Plus, Key, Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
-import blockchainService, { WalletData } from '@/services/blockchainService';
-
-interface WalletAccount extends Omit<WalletData, 'nonce'> {
-  nonce: number;
-}
+import blockchainService from '@/services/blockchainService';
+import { WalletCreationForm } from './wallet/WalletCreationForm';
+import { WalletList } from './wallet/WalletList';
+import { WalletDetails } from './wallet/WalletDetails';
+import { WalletAccount, NewWalletForm } from './wallet/types';
 
 export const WalletManager: React.FC = () => {
   const [wallets, setWallets] = useState<WalletAccount[]>([]);
   const [showPrivateKeys, setShowPrivateKeys] = useState<{[key: string]: boolean}>({});
-  const [newWalletForm, setNewWalletForm] = useState({
+  const [newWalletForm, setNewWalletForm] = useState<NewWalletForm>({
     privateKey: '',
     importing: false
   });
@@ -221,10 +213,6 @@ export const WalletManager: React.FC = () => {
     }));
   };
 
-  const truncateHash = (hash: string) => {
-    return `${hash.slice(0, 8)}...${hash.slice(-6)}`;
-  };
-
   const deleteWallet = (address: string) => {
     const updatedWallets = wallets.filter(wallet => wallet.address !== address);
     setWallets(updatedWallets);
@@ -242,232 +230,35 @@ export const WalletManager: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Wallet className="w-5 h-5" />
-            <span>Wallet Manager</span>
-          </CardTitle>
-          <CardDescription>
-            Create, import, and manage your blockchain wallets with real data
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Button onClick={createNewWallet} className="w-full" disabled={loading}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create New Wallet
-            </Button>
-            <Button 
-              onClick={() => setNewWalletForm({...newWalletForm, importing: !newWalletForm.importing})}
-              variant="outline" 
-              className="w-full"
-            >
-              <Key className="w-4 h-4 mr-2" />
-              Import Wallet
-            </Button>
-          </div>
+      <WalletCreationForm
+        newWalletForm={newWalletForm}
+        setNewWalletForm={setNewWalletForm}
+        createNewWallet={createNewWallet}
+        importWallet={importWallet}
+        loading={loading}
+      />
 
-          {newWalletForm.importing && (
-            <>
-              <Separator />
-              <div className="space-y-3">
-                <Label htmlFor="privateKey">Private Key</Label>
-                <Input
-                  id="privateKey"
-                  type="password"
-                  placeholder="Enter private key (0x...)"
-                  value={newWalletForm.privateKey}
-                  onChange={(e) => setNewWalletForm({...newWalletForm, privateKey: e.target.value})}
-                />
-                <div className="flex space-x-2">
-                  <Button onClick={importWallet} className="flex-1" disabled={loading}>
-                    Import
-                  </Button>
-                  <Button 
-                    onClick={() => setNewWalletForm({privateKey: '', importing: false})}
-                    variant="outline"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      <WalletList
+        wallets={wallets}
+        refreshBalance={refreshBalance}
+        refreshAllBalances={refreshAllBalances}
+        copyToClipboard={copyToClipboard}
+        setSelectedWallet={setSelectedWallet}
+        refreshing={refreshing}
+        loading={loading}
+      />
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Wallet Accounts</CardTitle>
-              <CardDescription>
-                Manage your wallet accounts and view real balances from blockchain
-              </CardDescription>
-            </div>
-            {wallets.length > 0 && (
-              <Button 
-                onClick={refreshAllBalances} 
-                disabled={loading}
-                variant="outline"
-                size="sm"
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh All
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {wallets.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No wallets found. Create or import a wallet to get started.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Address</TableHead>
-                  <TableHead>Balance (ETH)</TableHead>
-                  <TableHead>Nonce</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {wallets.map((wallet) => (
-                  <TableRow key={wallet.address}>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-sm">{truncateHash(wallet.address)}</span>
-                        <Button
-                          onClick={() => copyToClipboard(wallet.address, 'Address')}
-                          variant="ghost"
-                          size="sm"
-                        >
-                          <Copy className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{wallet.balance} ETH</Badge>
-                    </TableCell>
-                    <TableCell>{wallet.nonce}</TableCell>
-                    <TableCell>
-                      <div className="flex space-x-1">
-                        <Button
-                          onClick={() => refreshBalance(wallet.address)}
-                          variant="ghost"
-                          size="sm"
-                          disabled={refreshing === wallet.address}
-                        >
-                          <RefreshCw className={`w-3 h-3 ${refreshing === wallet.address ? 'animate-spin' : ''}`} />
-                        </Button>
-                        <Button
-                          onClick={() => setSelectedWallet(wallet.address)}
-                          variant="ghost"
-                          size="sm"
-                        >
-                          Details
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {selectedWallet && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Wallet Details</CardTitle>
-            <CardDescription>Real wallet data from blockchain</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {wallets
-              .filter(wallet => wallet.address === selectedWallet)
-              .map(wallet => (
-                <div key={wallet.address} className="space-y-4">
-                  <div className="grid grid-cols-1 gap-4">
-                    <div>
-                      <div className="text-sm font-semibold">Address</div>
-                      <div className="flex items-center space-x-2">
-                        <p className="font-mono text-sm break-all">{wallet.address}</p>
-                        <Button
-                          onClick={() => copyToClipboard(wallet.address, 'Address')}
-                          variant="ghost"
-                          size="sm"
-                        >
-                          <Copy className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold">Private Key</div>
-                      <div className="flex items-center space-x-2">
-                        <p className="font-mono text-sm break-all">
-                          {showPrivateKeys[wallet.address] ? wallet.privateKey : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'}
-                        </p>
-                        <Button
-                          onClick={() => togglePrivateKeyVisibility(wallet.address)}
-                          variant="ghost"
-                          size="sm"
-                        >
-                          {showPrivateKeys[wallet.address] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </Button>
-                        {showPrivateKeys[wallet.address] && (
-                          <Button
-                            onClick={() => copyToClipboard(wallet.privateKey, 'Private Key')}
-                            variant="ghost"
-                            size="sm"
-                          >
-                            <Copy className="w-3 h-3" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <div className="text-sm font-semibold">Balance (Real)</div>
-                        <p className="text-lg font-bold">{wallet.balance} ETH</p>
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold">Nonce (Real)</div>
-                        <p className="text-lg">{wallet.nonce}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    <Button 
-                      onClick={() => refreshBalance(wallet.address)}
-                      variant="outline"
-                      disabled={refreshing === wallet.address}
-                    >
-                      <RefreshCw className={`w-4 h-4 mr-2 ${refreshing === wallet.address ? 'animate-spin' : ''}`} />
-                      Refresh Data
-                    </Button>
-                    <Button 
-                      onClick={() => setSelectedWallet('')}
-                      variant="outline"
-                      className="flex-1"
-                    >
-                      Close
-                    </Button>
-                    <Button 
-                      onClick={() => deleteWallet(wallet.address)}
-                      variant="destructive"
-                    >
-                      Delete Wallet
-                    </Button>
-                  </div>
-                </div>
-              ))}
-          </CardContent>
-        </Card>
-      )}
+      <WalletDetails
+        selectedWallet={selectedWallet}
+        wallets={wallets}
+        showPrivateKeys={showPrivateKeys}
+        togglePrivateKeyVisibility={togglePrivateKeyVisibility}
+        copyToClipboard={copyToClipboard}
+        refreshBalance={refreshBalance}
+        setSelectedWallet={setSelectedWallet}
+        deleteWallet={deleteWallet}
+        refreshing={refreshing}
+      />
     </div>
   );
 };
