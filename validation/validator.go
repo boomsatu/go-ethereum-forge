@@ -2,11 +2,11 @@
 package validation
 
 import (
-	"blockchain-node/core"
 	"blockchain-node/logger"
 	"errors"
 	"math/big"
 	"regexp"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -19,6 +19,39 @@ type Validator struct {
 	addressRegex        *regexp.Regexp
 }
 
+// Transaction interface to avoid circular import
+type Transaction interface {
+	GetHash() [32]byte
+	GetFrom() common.Address
+	GetTo() *common.Address
+	GetValue() *big.Int
+	GetGasPrice() *big.Int
+	GetGasLimit() uint64
+	GetData() []byte
+	GetV() *big.Int
+	GetR() *big.Int
+	GetS() *big.Int
+	VerifySignature() bool
+	ToJSON() ([]byte, error)
+}
+
+// Block interface to avoid circular import
+type Block interface {
+	GetHeader() BlockHeader
+	GetTransactions() []Transaction
+	ToJSON() ([]byte, error)
+}
+
+// BlockHeader interface to avoid circular import
+type BlockHeader interface {
+	GetNumber() uint64
+	GetParentHash() [32]byte
+	GetTimestamp() int64
+	GetGasLimit() uint64
+	GetGasUsed() uint64
+	GetHash() [32]byte
+}
+
 func NewValidator() *Validator {
 	return &Validator{
 		maxTransactionSize: 128 * 1024,      // 128 KB
@@ -29,48 +62,53 @@ func NewValidator() *Validator {
 	}
 }
 
-func (v *Validator) ValidateTransaction(tx *core.Transaction) error {
+func (v *Validator) ValidateTransaction(tx Transaction) error {
 	if tx == nil {
 		return errors.New("transaction is nil")
 	}
 	
 	// Validate gas price
-	if tx.GasPrice == nil || tx.GasPrice.Cmp(v.minGasPrice) < 0 {
-		logger.Warningf("Transaction gas price too low: %v", tx.GasPrice)
+	gasPrice := tx.GetGasPrice()
+	if gasPrice == nil || gasPrice.Cmp(v.minGasPrice) < 0 {
+		logger.Warningf("Transaction gas price too low: %v", gasPrice)
 		return errors.New("gas price too low")
 	}
 	
 	// Validate gas limit
-	if tx.GasLimit == 0 || tx.GasLimit > v.maxGasLimit {
-		logger.Warningf("Invalid gas limit: %d", tx.GasLimit)
+	gasLimit := tx.GetGasLimit()
+	if gasLimit == 0 || gasLimit > v.maxGasLimit {
+		logger.Warningf("Invalid gas limit: %d", gasLimit)
 		return errors.New("invalid gas limit")
 	}
 	
 	// Validate value
-	if tx.Value == nil || tx.Value.Sign() < 0 {
-		logger.Warningf("Invalid transaction value: %v", tx.Value)
+	value := tx.GetValue()
+	if value == nil || value.Sign() < 0 {
+		logger.Warningf("Invalid transaction value: %v", value)
 		return errors.New("invalid transaction value")
 	}
 	
 	// Validate to address format if present
-	if tx.To != nil && !v.IsValidAddress(tx.To.Hex()) {
-		logger.Warningf("Invalid to address: %s", tx.To.Hex())
+	to := tx.GetTo()
+	if to != nil && !v.IsValidAddress(to.Hex()) {
+		logger.Warningf("Invalid to address: %s", to.Hex())
 		return errors.New("invalid to address")
 	}
 	
 	// Validate from address
-	if tx.From == (common.Address{}) {
+	from := tx.GetFrom()
+	if from == (common.Address{}) {
 		logger.Warning("Transaction missing from address")
 		return errors.New("missing from address")
 	}
 	
-	if !v.IsValidAddress(tx.From.Hex()) {
-		logger.Warningf("Invalid from address: %s", tx.From.Hex())
+	if !v.IsValidAddress(from.Hex()) {
+		logger.Warningf("Invalid from address: %s", from.Hex())
 		return errors.New("invalid from address")
 	}
 	
 	// Validate signature components
-	if tx.V == nil || tx.R == nil || tx.S == nil {
+	if tx.GetV() == nil || tx.GetR() == nil || tx.GetS() == nil {
 		logger.Warning("Transaction missing signature components")
 		return errors.New("missing signature components")
 	}
@@ -93,35 +131,36 @@ func (v *Validator) ValidateTransaction(tx *core.Transaction) error {
 		return errors.New("invalid transaction signature")
 	}
 	
-	logger.Debugf("Transaction validation passed: %s", tx.Hash.Hex())
+	logger.Debugf("Transaction validation passed: %s", tx.GetHash())
 	return nil
 }
 
-func (v *Validator) ValidateBlock(block *core.Block) error {
+func (v *Validator) ValidateBlock(block Block) error {
 	if block == nil {
 		return errors.New("block is nil")
 	}
 	
-	if block.Header == nil {
+	header := block.GetHeader()
+	if header == nil {
 		return errors.New("block header is nil")
 	}
 	
 	// Validate block gas limit
-	if block.Header.GasLimit > v.maxGasLimit {
-		logger.Warningf("Block gas limit too high: %d", block.Header.GasLimit)
+	if header.GetGasLimit() > v.maxGasLimit {
+		logger.Warningf("Block gas limit too high: %d", header.GetGasLimit())
 		return errors.New("block gas limit too high")
 	}
 	
 	// Validate gas used doesn't exceed limit
-	if block.Header.GasUsed > block.Header.GasLimit {
-		logger.Warningf("Block gas used exceeds limit: %d > %d", block.Header.GasUsed, block.Header.GasLimit)
+	if header.GetGasUsed() > header.GetGasLimit() {
+		logger.Warningf("Block gas used exceeds limit: %d > %d", header.GetGasUsed(), header.GetGasLimit())
 		return errors.New("block gas used exceeds limit")
 	}
 	
 	// Validate block timestamp (should not be too far in future)
 	// Allow up to 15 minutes in future
-	if block.Header.Timestamp > (getCurrentTimestamp() + 900) {
-		logger.Warningf("Block timestamp too far in future: %d", block.Header.Timestamp)
+	if header.GetTimestamp() > (getCurrentTimestamp() + 900) {
+		logger.Warningf("Block timestamp too far in future: %d", header.GetTimestamp())
 		return errors.New("block timestamp too far in future")
 	}
 	
@@ -139,21 +178,22 @@ func (v *Validator) ValidateBlock(block *core.Block) error {
 	
 	// Validate all transactions in block
 	totalGasUsed := uint64(0)
-	for i, tx := range block.Transactions {
+	transactions := block.GetTransactions()
+	for i, tx := range transactions {
 		if err := v.ValidateTransaction(tx); err != nil {
 			logger.Errorf("Invalid transaction %d in block: %v", i, err)
 			return err
 		}
-		totalGasUsed += tx.GasLimit
+		totalGasUsed += tx.GetGasLimit()
 	}
 	
 	// Check if calculated gas matches header
-	if totalGasUsed != block.Header.GasUsed {
-		logger.Warningf("Block gas used mismatch: calculated %d, header %d", totalGasUsed, block.Header.GasUsed)
+	if totalGasUsed != header.GetGasUsed() {
+		logger.Warningf("Block gas used mismatch: calculated %d, header %d", totalGasUsed, header.GetGasUsed())
 		return errors.New("block gas used mismatch")
 	}
 	
-	logger.Debugf("Block validation passed: %s", block.Header.Hash.Hex())
+	logger.Debugf("Block validation passed: %s", header.GetHash())
 	return nil
 }
 
@@ -170,5 +210,5 @@ func (v *Validator) ValidateGasLimit(gasLimit uint64) bool {
 }
 
 func getCurrentTimestamp() int64 {
-	return int64(1640995200) // Placeholder for current timestamp
+	return time.Now().Unix()
 }

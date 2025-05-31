@@ -4,6 +4,7 @@ package core
 import (
 	"blockchain-node/crypto"
 	"blockchain-node/interfaces"
+	"blockchain-node/validation"
 	"encoding/json"
 	"math/big"
 	"time"
@@ -35,6 +36,10 @@ func (bh *BlockHeader) SetHash(h [32]byte) { bh.Hash = h }
 func (bh *BlockHeader) GetNonce() uint64 { return bh.Nonce }
 func (bh *BlockHeader) SetNonce(n uint64) { bh.Nonce = n }
 
+// Implement validation.BlockHeader interface
+func (bh *BlockHeader) GetGasLimit() uint64 { return bh.GasLimit }
+func (bh *BlockHeader) GetGasUsed() uint64 { return bh.GasUsed }
+
 type Block struct {
 	Header       *BlockHeader           `json:"header"`
 	Transactions []*Transaction         `json:"transactions"`
@@ -45,6 +50,15 @@ type Block struct {
 func (b *Block) GetHeader() interfaces.BlockHeader { return b.Header }
 func (b *Block) GetTransactions() []interface{} {
 	txs := make([]interface{}, len(b.Transactions))
+	for i, tx := range b.Transactions {
+		txs[i] = tx
+	}
+	return txs
+}
+
+// Implement validation.Block interface
+func (b *Block) GetTransactions() []validation.Transaction {
+	txs := make([]validation.Transaction, len(b.Transactions))
 	for i, tx := range b.Transactions {
 		txs[i] = tx
 	}
