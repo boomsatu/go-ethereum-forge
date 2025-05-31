@@ -1,0 +1,42 @@
+
+# Production Configuration
+# Optimized for production deployment with security and performance
+
+# Node Configuration
+datadir: "/opt/blockchain/data"
+port: 8080
+rpcport: 8545
+rpcaddr: "0.0.0.0"
+
+# Mining Configuration
+mining: false
+miner: ""
+
+# Network Configuration
+maxpeers: 100
+bootnode: []
+
+# Chain Configuration
+chainid: 1
+blockgaslimit: 10000000
+
+# Database Configuration
+cache: 512
+handles: 512
+
+# Logging Configuration
+verbosity: 2
+
+# Security Configuration
+enable_rate_limit: true
+rate_limit: 1000
+rate_limit_window: "1m"
+
+# Performance Configuration
+enable_cache: true
+cache_size: 50000
+connection_timeout: "30s"
+
+# Health Check Configuration
+health_check_interval: "30s"
+enable_metrics: true

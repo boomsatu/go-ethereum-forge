@@ -1,0 +1,42 @@
+
+# Development Configuration
+# Optimized for local development and testing
+
+# Node Configuration
+datadir: "./data"
+port: 8080
+rpcport: 8545
+rpcaddr: "127.0.0.1"
+
+# Mining Configuration
+mining: true
+miner: "0x742d35Cc6635C0532925a3b8D5c6C1C8b1c5C6C7"
+
+# Network Configuration
+maxpeers: 10
+bootnode: []
+
+# Chain Configuration
+chainid: 1337
+blockgaslimit: 8000000
+
+# Database Configuration
+cache: 128
+handles: 128
+
+# Logging Configuration
+verbosity: 4
+
+# Security Configuration
+enable_rate_limit: false
+rate_limit: 100
+rate_limit_window: "1m"
+
+# Performance Configuration
+enable_cache: true
+cache_size: 1000
+connection_timeout: "10s"
+
+# Health Check Configuration
+health_check_interval: "10s"
+enable_metrics: true

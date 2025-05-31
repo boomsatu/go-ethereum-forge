@@ -1,0 +1,45 @@
+
+# Testnet Configuration
+# For public testnet deployment
+
+# Node Configuration
+datadir: "./data"
+port: 8080
+rpcport: 8545
+rpcaddr: "0.0.0.0"
+
+# Mining Configuration
+mining: true
+miner: ""
+
+# Network Configuration
+maxpeers: 50
+bootnode: [
+  "testnet-bootnode1.example.com:8080",
+  "testnet-bootnode2.example.com:8080"
+]
+
+# Chain Configuration
+chainid: 3
+blockgaslimit: 8000000
+
+# Database Configuration
+cache: 256
+handles: 256
+
+# Logging Configuration
+verbosity: 3
+
+# Security Configuration
+enable_rate_limit: true
+rate_limit: 500
+rate_limit_window: "1m"
+
+# Performance Configuration
+enable_cache: true
+cache_size: 10000
+connection_timeout: "30s"
+
+# Health Check Configuration
+health_check_interval: "30s"
+enable_metrics: true
