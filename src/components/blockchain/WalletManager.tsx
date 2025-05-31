@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Wallet, Plus, Key, Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
 import blockchainService, { WalletData } from '@/services/blockchainService';
 
-interface WalletAccount extends WalletData {
+interface WalletAccount extends Omit<WalletData, 'nonce'> {
   nonce: number;
 }
 
