@@ -3,11 +3,14 @@ package network
 
 import (
 	"blockchain-node/core"
+	"blockchain-node/interfaces"
+	"blockchain-node/logger"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -28,15 +31,32 @@ type Server struct {
 }
 
 type Peer struct {
-	conn     net.Conn
-	address  string
-	version  string
-	services uint64
+	conn        net.Conn
+	address     string
+	version     string
+	services    uint64
+	chainID     uint64
+	genesisHash [32]byte
+	bestHeight  uint64
+	handshaked  bool
 }
 
 type Message struct {
 	Type string      `json:"type"`
 	Data interface{} `json:"data"`
+}
+
+type VersionMessage struct {
+	Version     string   `json:"version"`
+	ChainID     uint64   `json:"chainId"`
+	GenesisHash [32]byte `json:"genesisHash"`
+	BestHeight  uint64   `json:"bestHeight"`
+	Services    uint64   `json:"services"`
+}
+
+type HandshakeData struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
 }
 
 func NewServer(port int, blockchain *core.Blockchain) *Server {
@@ -61,7 +81,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go s.acceptConnections()
 
-	fmt.Printf("P2P server started on port %d\n", s.port)
+	logger.Infof("P2P server started on port %d", s.port)
+	logger.Infof("Genesis hash: %x", s.blockchain.GetGenesisHash())
+	logger.Infof("Chain ID: %d", s.blockchain.GetChainID())
 	
 	// Wait for context cancellation
 	<-ctx.Done()
@@ -88,7 +110,7 @@ func (s *Server) Stop() error {
 		peer.conn.Close()
 	}
 
-	fmt.Println("P2P server stopped")
+	logger.Info("P2P server stopped")
 	return nil
 }
 
@@ -97,7 +119,7 @@ func (s *Server) acceptConnections() {
 		conn, err := s.listener.Accept()
 		if err != nil {
 			if s.running {
-				fmt.Printf("Failed to accept connection: %v\n", err)
+				logger.Errorf("Failed to accept connection: %v", err)
 			}
 			continue
 		}
@@ -114,6 +136,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 		address: conn.RemoteAddr().String(),
 	}
 
+	logger.Infof("New peer connected: %s", peer.address)
+
+	// Set connection timeout for handshake
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
+	// Perform handshake
+	if !s.performHandshake(peer) {
+		logger.Errorf("Handshake failed with peer %s", peer.address)
+		return
+	}
+
+	// Remove read deadline after successful handshake
+	conn.SetReadDeadline(time.Time{})
+
 	s.mu.Lock()
 	s.peers[peer.address] = peer
 	s.mu.Unlock()
@@ -122,16 +158,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 		s.mu.Lock()
 		delete(s.peers, peer.address)
 		s.mu.Unlock()
+		logger.Infof("Peer disconnected: %s", peer.address)
 	}()
-
-	fmt.Printf("New peer connected: %s\n", peer.address)
 
 	// Handle peer messages
 	decoder := json.NewDecoder(conn)
 	for {
 		var msg Message
 		if err := decoder.Decode(&msg); err != nil {
-			fmt.Printf("Peer %s disconnected: %v\n", peer.address, err)
+			logger.Debugf("Peer %s disconnected: %v", peer.address, err)
 			break
 		}
 
@@ -139,10 +174,146 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
+func (s *Server) performHandshake(peer *Peer) bool {
+	// Send version message
+	currentBlock := s.blockchain.GetCurrentBlock()
+	bestHeight := uint64(0)
+	if currentBlock != nil {
+		bestHeight = currentBlock.Header.Number
+	}
+
+	versionMsg := VersionMessage{
+		Version:     "1.0.0",
+		ChainID:     s.blockchain.GetChainID(),
+		GenesisHash: s.blockchain.GetGenesisHash(),
+		BestHeight:  bestHeight,
+		Services:    1, // Full node
+	}
+
+	if err := s.sendMessage(peer, &Message{
+		Type: "version",
+		Data: versionMsg,
+	}); err != nil {
+		logger.Errorf("Failed to send version to %s: %v", peer.address, err)
+		return false
+	}
+
+	// Wait for version response
+	decoder := json.NewDecoder(peer.conn)
+	var response Message
+	if err := decoder.Decode(&response); err != nil {
+		logger.Errorf("Failed to receive version from %s: %v", peer.address, err)
+		return false
+	}
+
+	if response.Type != "version" {
+		logger.Errorf("Expected version message from %s, got %s", peer.address, response.Type)
+		return false
+	}
+
+	// Parse peer version
+	versionData, err := json.Marshal(response.Data)
+	if err != nil {
+		logger.Errorf("Failed to parse version data from %s: %v", peer.address, err)
+		return false
+	}
+
+	var peerVersion VersionMessage
+	if err := json.Unmarshal(versionData, &peerVersion); err != nil {
+		logger.Errorf("Failed to unmarshal version from %s: %v", peer.address, err)
+		return false
+	}
+
+	// Verify compatibility
+	if peerVersion.ChainID != s.blockchain.GetChainID() {
+		logger.Errorf("Chain ID mismatch with %s: expected %d, got %d", 
+			peer.address, s.blockchain.GetChainID(), peerVersion.ChainID)
+		
+		s.sendMessage(peer, &Message{
+			Type: "handshake_error",
+			Data: HandshakeData{
+				Success: false,
+				Message: fmt.Sprintf("Chain ID mismatch: expected %d, got %d", 
+					s.blockchain.GetChainID(), peerVersion.ChainID),
+			},
+		})
+		return false
+	}
+
+	if peerVersion.GenesisHash != s.blockchain.GetGenesisHash() {
+		logger.Errorf("Genesis hash mismatch with %s", peer.address)
+		
+		s.sendMessage(peer, &Message{
+			Type: "handshake_error",
+			Data: HandshakeData{
+				Success: false,
+				Message: "Genesis hash mismatch",
+			},
+		})
+		return false
+	}
+
+	// Update peer info
+	peer.version = peerVersion.Version
+	peer.chainID = peerVersion.ChainID
+	peer.genesisHash = peerVersion.GenesisHash
+	peer.bestHeight = peerVersion.BestHeight
+	peer.services = peerVersion.Services
+	peer.handshaked = true
+
+	// Send handshake success
+	if err := s.sendMessage(peer, &Message{
+		Type: "handshake_success",
+		Data: HandshakeData{
+			Success: true,
+			Message: "Handshake completed successfully",
+		},
+	}); err != nil {
+		logger.Errorf("Failed to send handshake success to %s: %v", peer.address, err)
+		return false
+	}
+
+	logger.Infof("Handshake completed with peer %s (ChainID: %d, Height: %d)", 
+		peer.address, peer.chainID, peer.bestHeight)
+
+	// Request blocks if peer has higher height
+	if peer.bestHeight > bestHeight {
+		s.requestBlockSync(peer, bestHeight+1, peer.bestHeight)
+	}
+
+	return true
+}
+
+func (s *Server) requestBlockSync(peer *Peer, fromHeight, toHeight uint64) {
+	logger.Infof("Requesting block sync from %s (blocks %d-%d)", peer.address, fromHeight, toHeight)
+	
+	syncRequest := map[string]interface{}{
+		"from": fromHeight,
+		"to":   toHeight,
+	}
+
+	s.sendMessage(peer, &Message{
+		Type: "sync_request",
+		Data: syncRequest,
+	})
+}
+
 func (s *Server) handleMessage(peer *Peer, msg *Message) {
+	if !peer.handshaked && msg.Type != "version" && msg.Type != "handshake_error" && msg.Type != "handshake_success" {
+		logger.Errorf("Received %s message from non-handshaked peer %s", msg.Type, peer.address)
+		return
+	}
+
 	switch msg.Type {
 	case "version":
-		s.handleVersion(peer, msg)
+		// Version already handled in handshake
+		break
+	case "handshake_error":
+		s.handleHandshakeError(peer, msg)
+	case "handshake_success":
+		s.handleHandshakeSuccess(peer, msg)
+	case "sync_request":
+		s.handleSyncRequest(peer, msg)
 	case "getblocks":
 		s.handleGetBlocks(peer, msg)
 	case "inv":
@@ -154,22 +325,36 @@ func (s *Server) handleMessage(peer *Peer, msg *Message) {
 	case "tx":
 		s.handleTransaction(peer, msg)
 	default:
-		fmt.Printf("Unknown message type from %s: %s\n", peer.address, msg.Type)
+		logger.Debugf("Unknown message type from %s: %s", peer.address, msg.Type)
 	}
 }
 
-func (s *Server) handleVersion(peer *Peer, msg *Message) {
-	// Handle version message
-	versionData, _ := msg.Data.(map[string]interface{})
-	peer.version = versionData["version"].(string)
+func (s *Server) handleHandshakeError(peer *Peer, msg *Message) {
+	handshakeData, _ := msg.Data.(map[string]interface{})
+	message := handshakeData["message"].(string)
+	logger.Errorf("Handshake error from %s: %s", peer.address, message)
+}
 
-	// Send verack
-	s.sendMessage(peer, &Message{
-		Type: "verack",
-		Data: map[string]interface{}{
-			"success": true,
-		},
-	})
+func (s *Server) handleHandshakeSuccess(peer *Peer, msg *Message) {
+	logger.Infof("Handshake success with %s", peer.address)
+}
+
+func (s *Server) handleSyncRequest(peer *Peer, msg *Message) {
+	syncData, _ := msg.Data.(map[string]interface{})
+	from := uint64(syncData["from"].(float64))
+	to := uint64(syncData["to"].(float64))
+
+	logger.Infof("Sync request from %s for blocks %d-%d", peer.address, from, to)
+
+	// Send blocks
+	for i := from; i <= to; i++ {
+		if block := s.blockchain.GetBlockByNumber(i); block != nil {
+			s.sendMessage(peer, &Message{
+				Type: "block",
+				Data: block,
+			})
+		}
+	}
 }
 
 func (s *Server) handleGetBlocks(peer *Peer, msg *Message) {
@@ -252,17 +437,17 @@ func (s *Server) handleBlock(peer *Peer, msg *Message) {
 	blockData, _ := json.Marshal(msg.Data)
 	var block core.Block
 	if err := json.Unmarshal(blockData, &block); err != nil {
-		fmt.Printf("Failed to decode block from %s: %v\n", peer.address, err)
+		logger.Errorf("Failed to decode block from %s: %v", peer.address, err)
 		return
 	}
 
 	// Add block to blockchain
 	if err := s.blockchain.AddBlock(&block); err != nil {
-		fmt.Printf("Failed to add block from %s: %v\n", peer.address, err)
+		logger.Debugf("Failed to add block from %s: %v", peer.address, err)
 		return
 	}
 
-	fmt.Printf("Added block %d from peer %s\n", block.Header.Number, peer.address)
+	logger.Infof("Added block %d from peer %s", block.Header.Number, peer.address)
 }
 
 func (s *Server) handleTransaction(peer *Peer, msg *Message) {
@@ -270,24 +455,25 @@ func (s *Server) handleTransaction(peer *Peer, msg *Message) {
 	txData, _ := json.Marshal(msg.Data)
 	var tx core.Transaction
 	if err := json.Unmarshal(txData, &tx); err != nil {
-		fmt.Printf("Failed to decode transaction from %s: %v\n", peer.address, err)
+		logger.Errorf("Failed to decode transaction from %s: %v", peer.address, err)
 		return
 	}
 
 	// Add transaction to mempool
 	if err := s.blockchain.AddTransaction(&tx); err != nil {
-		fmt.Printf("Failed to add transaction from %s: %v\n", peer.address, err)
+		logger.Debugf("Failed to add transaction from %s: %v", peer.address, err)
 		return
 	}
 
-	fmt.Printf("Added transaction %x from peer %s\n", tx.Hash, peer.address)
+	logger.Debugf("Added transaction %x from peer %s", tx.Hash, peer.address)
 }
 
-func (s *Server) sendMessage(peer *Peer, msg *Message) {
+func (s *Server) sendMessage(peer *Peer, msg *Message) error {
 	encoder := json.NewEncoder(peer.conn)
 	if err := encoder.Encode(msg); err != nil {
-		fmt.Printf("Failed to send message to %s: %v\n", peer.address, err)
+		return fmt.Errorf("failed to send message to %s: %v", peer.address, err)
 	}
+	return nil
 }
 
 func (s *Server) BroadcastTransaction(tx *core.Transaction) {
@@ -300,7 +486,9 @@ func (s *Server) BroadcastTransaction(tx *core.Transaction) {
 	}
 
 	for _, peer := range s.peers {
-		s.sendMessage(peer, msg)
+		if peer.handshaked {
+			s.sendMessage(peer, msg)
+		}
 	}
 }
 
@@ -314,16 +502,26 @@ func (s *Server) BroadcastBlock(block *core.Block) {
 	}
 
 	for _, peer := range s.peers {
-		s.sendMessage(peer, msg)
+		if peer.handshaked {
+			s.sendMessage(peer, msg)
+		}
 	}
 }
 
 func (s *Server) GetPeerCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return len(s.peers)
+	count := 0
+	for _, peer := range s.peers {
+		if peer.handshaked {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Server) GetConnectionCount() int {
-	return s.GetPeerCount()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.peers)
 }

@@ -1,3 +1,4 @@
+
 package cmd
 
 import (
@@ -37,6 +38,7 @@ func init() {
 	startNodeCmd.Flags().String("miner", "", "Miner address for block rewards")
 	startNodeCmd.Flags().Bool("enable-metrics", true, "Enable metrics collection")
 	startNodeCmd.Flags().Bool("enable-health", true, "Enable health check endpoints")
+	startNodeCmd.Flags().String("genesis", "genesis.json", "Path to genesis configuration file")
 }
 
 func runStartNode(cmd *cobra.Command, args []string) error {
@@ -46,11 +48,15 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %v", err)
 	}
 	
+	// Get genesis path from flag
+	genesisPath, _ := cmd.Flags().GetString("genesis")
+	
 	// Set logging level based on config
 	logger.SetLevel(logger.LogLevel(cfg.GetLogLevel()))
 	
 	logger.Info("Starting custom blockchain node...")
 	logger.Infof("Configuration loaded: DataDir=%s, Port=%d, RPCPort=%d", cfg.DataDir, cfg.Port, cfg.RPCPort)
+	logger.Infof("Using genesis file: %s", genesisPath)
 	
 	// Initialize security manager
 	securityManager := security.NewSecurityManager()
@@ -60,6 +66,7 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 		DataDir:       cfg.DataDir,
 		ChainID:       cfg.ChainID,
 		BlockGasLimit: cfg.BlockGasLimit,
+		GenesisPath:   genesisPath,
 	}
 	
 	blockchain, err := core.NewBlockchain(blockchainConfig)
@@ -208,6 +215,8 @@ func runStartNode(cmd *cobra.Command, args []string) error {
 	}
 	
 	logger.Info("Custom blockchain node started successfully")
+	logger.Infof("Chain ID: %d", blockchain.GetChainID())
+	logger.Infof("Genesis Hash: %x", blockchain.GetGenesisHash())
 	logger.Info("Press Ctrl+C to stop the node")
 	
 	// Wait for interrupt signal

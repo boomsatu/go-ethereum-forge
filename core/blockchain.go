@@ -9,8 +9,10 @@ import (
 	"blockchain-node/metrics"
 	"blockchain-node/state"
 	"blockchain-node/validation"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/big"
 	"sync"
 )
@@ -19,6 +21,20 @@ type Config struct {
 	DataDir       string
 	ChainID       uint64
 	BlockGasLimit uint64
+	GenesisPath   string
+}
+
+type GenesisConfig struct {
+	Config struct {
+		ChainID uint64 `json:"chainId"`
+	} `json:"config"`
+	Alloc map[string]struct {
+		Balance string `json:"balance"`
+	} `json:"alloc"`
+	Coinbase   string `json:"coinbase"`
+	Difficulty string `json:"difficulty"`
+	GasLimit   string `json:"gasLimit"`
+	Timestamp  string `json:"timestamp"`
 }
 
 type Blockchain struct {
@@ -35,6 +51,7 @@ type Blockchain struct {
 	cache       *cache.Cache
 	mu          sync.RWMutex
 	shutdownCh  chan struct{}
+	genesisConfig *GenesisConfig
 }
 
 func NewBlockchain(config *Config) (*Blockchain, error) {
@@ -66,6 +83,12 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 		shutdownCh:    make(chan struct{}),
 	}
 
+	// Load genesis config from file
+	if err := bc.loadGenesisConfig(config.GenesisPath); err != nil {
+		logger.Errorf("Failed to load genesis config: %v", err)
+		return nil, fmt.Errorf("failed to load genesis config: %v", err)
+	}
+
 	// VM will be set later to avoid circular dependency
 	bc.vm = nil
 
@@ -77,6 +100,32 @@ func NewBlockchain(config *Config) (*Blockchain, error) {
 
 	logger.Info("Custom blockchain initialized successfully")
 	return bc, nil
+}
+
+func (bc *Blockchain) loadGenesisConfig(genesisPath string) error {
+	if genesisPath == "" {
+		genesisPath = "genesis.json"
+	}
+
+	data, err := ioutil.ReadFile(genesisPath)
+	if err != nil {
+		return fmt.Errorf("failed to read genesis file: %v", err)
+	}
+
+	var genesis GenesisConfig
+	if err := json.Unmarshal(data, &genesis); err != nil {
+		return fmt.Errorf("failed to parse genesis file: %v", err)
+	}
+
+	bc.genesisConfig = &genesis
+	
+	// Update blockchain config from genesis
+	if genesis.Config.ChainID != 0 {
+		bc.config.ChainID = genesis.Config.ChainID
+	}
+
+	logger.Infof("Loaded genesis config for ChainID: %d", bc.config.ChainID)
+	return nil
 }
 
 // SetVirtualMachine sets the virtual machine for the blockchain
@@ -96,7 +145,22 @@ func (bc *Blockchain) initGenesis() error {
 	if block := bc.GetBlockByNumber(0); block != nil {
 		bc.currentBlock = block
 		logger.Infof("Genesis block already exists: %x", block.Header.Hash)
+		
+		// Verify genesis matches config
+		if err := bc.verifyGenesisBlock(block); err != nil {
+			logger.Errorf("Genesis block verification failed: %v", err)
+			return fmt.Errorf("genesis block verification failed: %v", err)
+		}
+		
 		return nil
+	}
+
+	// Parse difficulty from genesis config
+	difficulty := big.NewInt(1000)
+	if bc.genesisConfig != nil && bc.genesisConfig.Difficulty != "" {
+		if diffInt, ok := new(big.Int).SetString(bc.genesisConfig.Difficulty, 0); ok {
+			difficulty = diffInt
+		}
 	}
 
 	// Create genesis block
@@ -110,20 +174,31 @@ func (bc *Blockchain) initGenesis() error {
 			ReceiptHash:  [32]byte{},
 			GasLimit:     bc.config.BlockGasLimit,
 			GasUsed:      0,
-			Difficulty:   big.NewInt(1000),
+			Difficulty:   difficulty,
 		},
 		Transactions: []*Transaction{},
 		Receipts:     []*TransactionReceipt{},
 	}
 
-	// Set up genesis state (allocate some initial balances)
-	genesisAllocation := map[[20]byte]*big.Int{
-		[20]byte{0x74, 0x2d, 0x35, 0xcc, 0x66, 0x35, 0xc0, 0x53, 0x29, 0x25, 0xa3, 0xb8, 0xd5, 0xc6, 0xc1, 0xc8, 0xb1, 0xc5, 0xc6, 0xc}: big.NewInt(1e18), // 1 ETH
-	}
-
-	for addr, balance := range genesisAllocation {
-		bc.stateDB.SetBalance(addr, balance)
-		logger.Debugf("Genesis allocation: %x -> %s", addr, balance.String())
+	// Set up genesis state from config
+	if bc.genesisConfig != nil {
+		for addrStr, account := range bc.genesisConfig.Alloc {
+			var addr [20]byte
+			addrBytes := crypto.HexToBytes(addrStr)
+			copy(addr[:], addrBytes)
+			
+			balance := big.NewInt(0)
+			if balanceInt, ok := new(big.Int).SetString(account.Balance, 10); ok {
+				balance = balanceInt
+			}
+			
+			bc.stateDB.SetBalance(addr, balance)
+			logger.Debugf("Genesis allocation: %x -> %s", addr, balance.String())
+		}
+	} else {
+		// Default allocation if no genesis config
+		defaultAddr := [20]byte{0x74, 0x2d, 0x35, 0xcc, 0x66, 0x35, 0xc0, 0x53, 0x29, 0x25, 0xa3, 0xb8, 0xd5, 0xc6, 0xc1, 0xc8, 0xb1, 0xc5, 0xc6, 0xc}
+		bc.stateDB.SetBalance(defaultAddr, big.NewInt(1e18))
 	}
 
 	// Commit state and get state root
@@ -153,6 +228,32 @@ func (bc *Blockchain) initGenesis() error {
 	
 	logger.Info("Genesis block created successfully")
 	return nil
+}
+
+func (bc *Blockchain) verifyGenesisBlock(block *Block) error {
+	if bc.genesisConfig == nil {
+		return nil // Skip verification if no genesis config
+	}
+
+	// Verify chain ID matches
+	if bc.genesisConfig.Config.ChainID != bc.config.ChainID {
+		return fmt.Errorf("genesis chain ID mismatch: expected %d, got %d", 
+			bc.genesisConfig.Config.ChainID, bc.config.ChainID)
+	}
+
+	logger.Info("Genesis block verification passed")
+	return nil
+}
+
+func (bc *Blockchain) GetGenesisHash() [32]byte {
+	if genesis := bc.GetBlockByNumber(0); genesis != nil {
+		return genesis.Header.Hash
+	}
+	return [32]byte{}
+}
+
+func (bc *Blockchain) GetChainID() uint64 {
+	return bc.config.ChainID
 }
 
 func (bc *Blockchain) GetConfig() *Config {
