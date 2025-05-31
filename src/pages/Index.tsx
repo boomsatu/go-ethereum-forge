@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,7 @@ import { WalletManager } from "@/components/blockchain/WalletManager";
 import { NetworkStatus } from "@/components/blockchain/NetworkStatus";
 import { MetricsPanel } from "@/components/blockchain/MetricsPanel";
 import { Activity, Blocks, Wallet, Zap, Settings, TrendingUp } from "lucide-react";
-import { blockchainService } from '@/services/blockchainService';
+import blockchainService from '@/services/blockchainService';
 
 const Index = () => {
   const [nodeStatus, setNodeStatus] = useState<'stopped' | 'starting' | 'running' | 'error'>('stopped');

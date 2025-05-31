@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Network, Wifi, Users, Globe, Server, Activity, RefreshCw } from "lucide-react";
-import { blockchainService } from '@/services/blockchainService';
+import blockchainService from '@/services/blockchainService';
 
 interface NetworkInfo {
   chainId: string;

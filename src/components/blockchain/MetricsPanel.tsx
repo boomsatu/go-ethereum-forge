@@ -1,10 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { TrendingUp, Activity, Clock, Database, RefreshCw } from "lucide-react";
-import { blockchainService } from '@/services/blockchainService';
+import blockchainService from '@/services/blockchainService';
 
 interface MetricData {
   timestamp: string;

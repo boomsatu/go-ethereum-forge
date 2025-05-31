@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { Wallet, Plus, Key, Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
-import { blockchainService, WalletData } from '@/services/blockchainService';
+import blockchainService, { WalletData } from '@/services/blockchainService';
 
 interface WalletAccount extends WalletData {
   nonce: number;

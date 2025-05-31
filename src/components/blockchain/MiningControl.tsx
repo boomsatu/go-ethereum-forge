@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { Pickaxe, PlayCircle, StopCircle, Zap, Hash } from "lucide-react";
-import { blockchainService, MiningStats } from '@/services/blockchainService';
+import blockchainService, { MiningStats } from '@/services/blockchainService';
 
 interface MiningControlProps {
   connectionStatus: 'disconnected' | 'connecting' | 'connected';

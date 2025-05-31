@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { PlayCircle, StopCircle, RotateCcw, Settings } from "lucide-react";
-import { blockchainService, BlockchainConfig } from '@/services/blockchainService';
+import blockchainService, { BlockchainConfig } from '@/services/blockchainService';
 
 interface BlockchainControlProps {
   nodeStatus: 'stopped' | 'starting' | 'running' | 'error';

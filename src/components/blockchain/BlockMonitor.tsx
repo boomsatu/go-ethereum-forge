@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { RefreshCw, Blocks, Hash } from "lucide-react";
-import { blockchainService, BlockData } from '@/services/blockchainService';
+import blockchainService, { RawBlockData } from '@/services/blockchainService';
 
 interface BlockMonitorProps {
   limit?: number;
@@ -56,7 +56,7 @@ export const BlockMonitor: React.FC<BlockMonitorProps> = ({ limit }) => {
     setLoading(false);
   };
 
-  const processBlock = (block: BlockData): ProcessedBlock => {
+  const processBlock = (block: RawBlockData): ProcessedBlock => {
     return {
       number: parseInt(block.number, 16),
       hash: block.hash,
