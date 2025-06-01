@@ -1,3 +1,4 @@
+
 package database
 
 import (
@@ -112,6 +113,12 @@ func (w *EthDBWrapper) Close() error {
 func (w *EthDBWrapper) Ancient(kind string, number uint64) ([]byte, error) {
 	// Simple implementation - return not found for ancient data
 	return nil, nil
+}
+
+// AncientDatadir implements the missing method for ethdb.Database interface
+func (w *EthDBWrapper) AncientDatadir() (string, error) {
+	// Simple implementation - return empty string for ancient data directory
+	return "", nil
 }
 
 // BatchWrapper implements ethdb.Batch
