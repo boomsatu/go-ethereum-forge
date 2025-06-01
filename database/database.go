@@ -1,3 +1,4 @@
+
 package database
 
 import (
@@ -6,6 +7,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type Database interface {
@@ -92,8 +94,11 @@ func (w *EthDBWrapper) NewBatch() ethdb.Batch {
 }
 
 func (w *EthDBWrapper) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
-	// Simple implementation - in production, use proper iterator
-	return &IteratorWrapper{}
+	iter := w.db.db.NewIterator(util.BytesPrefix(prefix), nil)
+	if start != nil {
+		iter.Seek(start)
+	}
+	return &IteratorWrapper{iter: iter}
 }
 
 func (w *EthDBWrapper) Stat(property string) (string, error) {
@@ -101,29 +106,59 @@ func (w *EthDBWrapper) Stat(property string) (string, error) {
 }
 
 func (w *EthDBWrapper) Compact(start []byte, limit []byte) error {
-	return nil
+	return w.db.db.CompactRange(util.Range{Start: start, Limit: limit})
 }
 
 func (w *EthDBWrapper) Close() error {
 	return w.db.Close()
 }
 
-// Ancient implements the missing method for ethdb.Database interface
 func (w *EthDBWrapper) Ancient(kind string, number uint64) ([]byte, error) {
-	// Simple implementation - return not found for ancient data
-	return nil, nil
+	return nil, ethdb.ErrNotFound
 }
 
-// AncientDatadir implements the missing method for ethdb.Database interface
 func (w *EthDBWrapper) AncientDatadir() (string, error) {
-	// Simple implementation - return empty string for ancient data directory
 	return "", nil
 }
 
-// AncientRange implements the missing method for ethdb.Database interface
 func (w *EthDBWrapper) AncientRange(kind string, start, count, maxBytes uint64) ([][]byte, error) {
-	// Simple implementation - return empty slice for ancient data range
 	return [][]byte{}, nil
+}
+
+func (w *EthDBWrapper) AncientSize(kind string) (uint64, error) {
+	return 0, nil
+}
+
+func (w *EthDBWrapper) HasAncient(kind string, number uint64) (bool, error) {
+	return false, nil
+}
+
+func (w *EthDBWrapper) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (int64, error) {
+	return 0, nil
+}
+
+func (w *EthDBWrapper) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err error) {
+	return nil
+}
+
+func (w *EthDBWrapper) TruncateHead(n uint64) error {
+	return nil
+}
+
+func (w *EthDBWrapper) TruncateTail(n uint64) error {
+	return nil
+}
+
+func (w *EthDBWrapper) Sync() error {
+	return nil
+}
+
+func (w *EthDBWrapper) MigrateTable(s string, f func([]byte) ([]byte, error)) error {
+	return nil
+}
+
+func (w *EthDBWrapper) NewSnapshot() (ethdb.Snapshot, error) {
+	return &SnapshotWrapper{}, nil
 }
 
 // BatchWrapper implements ethdb.Batch
@@ -159,10 +194,39 @@ func (b *BatchWrapper) Replay(w ethdb.KeyValueWriter) error {
 }
 
 // IteratorWrapper implements ethdb.Iterator
-type IteratorWrapper struct{}
+type IteratorWrapper struct {
+	iter *leveldb.Iterator
+}
 
-func (i *IteratorWrapper) Next() bool    { return false }
-func (i *IteratorWrapper) Error() error  { return nil }
-func (i *IteratorWrapper) Key() []byte   { return nil }
-func (i *IteratorWrapper) Value() []byte { return nil }
-func (i *IteratorWrapper) Release()      {}
+func (i *IteratorWrapper) Next() bool {
+	return i.iter.Next()
+}
+
+func (i *IteratorWrapper) Error() error {
+	return i.iter.Error()
+}
+
+func (i *IteratorWrapper) Key() []byte {
+	return i.iter.Key()
+}
+
+func (i *IteratorWrapper) Value() []byte {
+	return i.iter.Value()
+}
+
+func (i *IteratorWrapper) Release() {
+	i.iter.Release()
+}
+
+// SnapshotWrapper implements ethdb.Snapshot
+type SnapshotWrapper struct{}
+
+func (s *SnapshotWrapper) Has(key []byte) (bool, error) {
+	return false, nil
+}
+
+func (s *SnapshotWrapper) Get(key []byte) ([]byte, error) {
+	return nil, ethdb.ErrNotFound
+}
+
+func (s *SnapshotWrapper) Release() {}

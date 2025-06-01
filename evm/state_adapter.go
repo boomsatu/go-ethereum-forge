@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/vm"
+	ethTypes "github.com/ethereum/go-ethereum/core/types"
 )
 
 // StateAdapter adapts our state to vm.StateDB interface
@@ -139,6 +139,3 @@ func (s *StateAdapter) AddPreimage(hash common.Hash, preimage []byte) {
 func (s *StateAdapter) ForEachStorage(addr common.Address, cb func(key, value common.Hash) bool) error {
 	return s.stateDB.ForEachStorage(addr, cb)
 }
-
-// Add missing import
-import ethTypes "github.com/ethereum/go-ethereum/core/types"

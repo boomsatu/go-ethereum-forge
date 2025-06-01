@@ -7,6 +7,8 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	ethTypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 type Transaction struct {
@@ -103,6 +105,31 @@ func (tx *Transaction) FromJSON(data []byte) error {
 	return json.Unmarshal(data, tx)
 }
 
+func (tx *Transaction) IsContractCreation() bool {
+	return tx.To == nil
+}
+
+func (tx *Transaction) ToEthTransaction() *ethTypes.Transaction {
+	var to *common.Address
+	if tx.To != nil {
+		to = tx.To
+	}
+	
+	ethTx := ethTypes.NewTx(&ethTypes.LegacyTx{
+		Nonce:    tx.Nonce,
+		To:       to,
+		Value:    tx.Value,
+		Gas:      tx.GasLimit,
+		GasPrice: tx.GasPrice,
+		Data:     tx.Data,
+		V:        tx.V,
+		R:        tx.R,
+		S:        tx.S,
+	})
+	
+	return ethTx
+}
+
 type TransactionReceipt struct {
 	TxHash            [32]byte        `json:"transactionHash"`
 	TxIndex           uint64          `json:"transactionIndex"`
@@ -118,12 +145,13 @@ type TransactionReceipt struct {
 }
 
 type Log struct {
-	Address     common.Address `json:"address"`
-	Topics      [][32]byte     `json:"topics"`
-	Data        []byte         `json:"data"`
-	BlockNumber uint64         `json:"blockNumber"`
-	TxHash      [32]byte       `json:"transactionHash"`
-	TxIndex     uint64         `json:"transactionIndex"`
-	BlockHash   [32]byte       `json:"blockHash"`
-	Index       uint64         `json:"logIndex"`
+	Address     common.Address   `json:"address"`
+	Topics      []common.Hash    `json:"topics"`
+	Data        []byte           `json:"data"`
+	BlockNumber uint64           `json:"blockNumber"`
+	TxHash      [32]byte         `json:"transactionHash"`
+	TxIndex     uint64           `json:"transactionIndex"`
+	BlockHash   [32]byte         `json:"blockHash"`
+	Index       uint64           `json:"logIndex"`
+	Removed     bool             `json:"removed"`
 }

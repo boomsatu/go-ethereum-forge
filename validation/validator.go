@@ -19,7 +19,7 @@ type Validator struct {
 	addressRegex        *regexp.Regexp
 }
 
-// Transaction interface to avoid circular import
+// Transaction interface for validation
 type Transaction interface {
 	GetHash() [32]byte
 	GetFrom() common.Address
@@ -35,14 +35,14 @@ type Transaction interface {
 	ToJSON() ([]byte, error)
 }
 
-// Block interface to avoid circular import
+// Block interface for validation
 type Block interface {
 	GetHeader() BlockHeader
-	GetTransactions() []Transaction
+	GetValidationTransactions() []Transaction
 	ToJSON() ([]byte, error)
 }
 
-// BlockHeader interface to avoid circular import
+// BlockHeader interface for validation
 type BlockHeader interface {
 	GetNumber() uint64
 	GetParentHash() [32]byte
@@ -131,7 +131,7 @@ func (v *Validator) ValidateTransaction(tx Transaction) error {
 		return errors.New("invalid transaction signature")
 	}
 	
-	logger.Debugf("Transaction validation passed: %s", tx.GetHash())
+	logger.Debugf("Transaction validation passed: %x", tx.GetHash())
 	return nil
 }
 
@@ -178,7 +178,7 @@ func (v *Validator) ValidateBlock(block Block) error {
 	
 	// Validate all transactions in block
 	totalGasUsed := uint64(0)
-	transactions := block.GetTransactions()
+	transactions := block.GetValidationTransactions()
 	for i, tx := range transactions {
 		if err := v.ValidateTransaction(tx); err != nil {
 			logger.Errorf("Invalid transaction %d in block: %v", i, err)
@@ -193,7 +193,7 @@ func (v *Validator) ValidateBlock(block Block) error {
 		return errors.New("block gas used mismatch")
 	}
 	
-	logger.Debugf("Block validation passed: %s", header.GetHash())
+	logger.Debugf("Block validation passed: %x", header.GetHash())
 	return nil
 }
 

@@ -9,18 +9,19 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	ethTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 )
 
 type EVM struct {
-	blockchain *Blockchain
+	blockchain Blockchain
 	vmConfig   vm.Config
 }
 
 type Blockchain interface {
-	GetConfig() *core.Config
+	GetConfig() interface{}
 	GetCurrentBlock() *core.Block
-	GetBlockByHash(hash common.Hash) *core.Block
+	GetBlockByHash(hash [32]byte) *core.Block
 	GetBlockByNumber(number uint64) *core.Block
 }
 
@@ -36,8 +37,8 @@ func NewEVM(blockchain Blockchain) *EVM {
 func (e *EVM) ExecuteTransaction(stateDB *state.StateDB, tx *core.Transaction, header *core.BlockHeader, gasUsed uint64) (*core.TransactionReceipt, error) {
 	// Create EVM context
 	context := vm.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
+		CanTransfer: CanTransfer,
+		Transfer:    Transfer,
 		GetHash:     e.GetHashFn(header),
 		Coinbase:    common.Address{}, // Miner address
 		BlockNumber: new(big.Int).SetUint64(header.Number),
@@ -101,7 +102,7 @@ func (e *EVM) ExecuteTransaction(stateDB *state.StateDB, tx *core.Transaction, h
 func (e *EVM) GetHashFn(header *core.BlockHeader) vm.GetHashFunc {
 	return func(n uint64) common.Hash {
 		if block := e.blockchain.GetBlockByNumber(n); block != nil {
-			return block.Header.Hash
+			return common.BytesToHash(block.Header.Hash[:])
 		}
 		return common.Hash{}
 	}
@@ -126,5 +127,12 @@ func convertLogs(vmLogs []*ethTypes.Log, header *core.BlockHeader, tx *core.Tran
 	return logs
 }
 
-// Import crypto for CreateAddress function
-import "github.com/ethereum/go-ethereum/crypto"
+// Helper functions for EVM
+func CanTransfer(db vm.StateDB, addr common.Address, amount *big.Int) bool {
+	return db.GetBalance(addr).Cmp(amount) >= 0
+}
+
+func Transfer(db vm.StateDB, sender, recipient common.Address, amount *big.Int) {
+	db.SubBalance(sender, amount)
+	db.AddBalance(recipient, amount)
+}
