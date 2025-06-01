@@ -1,4 +1,3 @@
-
 package consensus
 
 import (
@@ -7,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 )

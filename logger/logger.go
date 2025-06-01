@@ -1,4 +1,3 @@
-
 package logger
 
 import (
@@ -8,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"

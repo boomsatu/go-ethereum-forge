@@ -1,4 +1,3 @@
-
 package database
 
 import (
@@ -107,6 +106,12 @@ func (w *EthDBWrapper) Compact(start []byte, limit []byte) error {
 
 func (w *EthDBWrapper) Close() error {
 	return w.db.Close()
+}
+
+// Ancient implements the missing method for ethdb.Database interface
+func (w *EthDBWrapper) Ancient(kind string, number uint64) ([]byte, error) {
+	// Simple implementation - return not found for ancient data
+	return nil, nil
 }
 
 // BatchWrapper implements ethdb.Batch
